@@ -50,7 +50,7 @@ const kyivPartsFormatter = new Intl.DateTimeFormat('en-GB', {
   hour: '2-digit',
   minute: '2-digit',
   second: '2-digit',
-  hourCycle: 'h23'
+  hour12: false
 });
 
 function getKyivParts(epochMs) {
@@ -59,6 +59,7 @@ function getKyivParts(epochMs) {
   for (const p of parts) {
     if (p.type !== 'literal') map[p.type] = parseInt(p.value, 10);
   }
+  if (map.hour === 24) map.hour = 0;
   return map;
 }
 

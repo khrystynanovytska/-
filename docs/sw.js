@@ -1,9 +1,9 @@
-const CACHE_NAME = 'svitlo-31-pwa-v5';
+const CACHE_NAME = 'svitlo-31-pwa-v6';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css',
-  './app.js',
+  './styles.css?v=6',
+  './app.js?v=6',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png'
@@ -11,7 +11,15 @@ const APP_SHELL = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.all(
+        APP_SHELL.map((url) =>
+          fetch(url, { cache: 'reload' }).then((resp) => {
+            if (resp && resp.ok) return cache.put(url, resp);
+          }).catch(() => {})
+        )
+      )
+    )
   );
   self.skipWaiting();
 });
@@ -46,7 +54,7 @@ self.addEventListener('fetch', (event) => {
   // Navigation requests fall back to cached index.html when offline
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request)
+      fetch(request.url, { cache: 'no-cache' })
         .then((response) => {
           const copy = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put('./index.html', copy));
@@ -57,10 +65,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Same-origin static assets: network-first so installed PWA gets updates immediately, with offline cache fallback
+  // Same-origin static assets: network-first (bypassing stale HTTP cache) with offline cache fallback
   if (url.origin === self.location.origin) {
     event.respondWith(
-      fetch(request)
+      fetch(request.url, { cache: 'no-cache' })
         .then((response) => {
           if (response && response.ok) {
             const copy = response.clone();
