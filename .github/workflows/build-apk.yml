@@ -14,13 +14,19 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Accept Android SDK licenses
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          mkdir -p "$SDK_ROOT/licenses"
+          printf "\n24333f8a63b6825ea9c5514f83c2829b004d1fee" >> "$SDK_ROOT/licenses/android-sdk-license"
+          printf "\nd56f5187479451eabf01fb78af6dfcb131a6481e" >> "$SDK_ROOT/licenses/android-sdk-license"
+          printf "\n84831b9409646a918e30573bab4c9c91346d8abd" >> "$SDK_ROOT/licenses/android-sdk-preview-license"
+          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
