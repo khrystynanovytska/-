@@ -100,7 +100,7 @@ function kyivMidnightMillis(key) {
   const corr1 = utcGuess - (asUtc1 - utcGuess);
   const p2 = getKyivParts(corr1);
   const asUtc2 = Date.UTC(p2.year, p2.month - 1, p2.day, p2.hour, p2.minute, p2.second, 0);
-  return corr1 - (asUtc2 - corr1);
+  return corr1 - (asUtc2 - utcGuess);
 }
 
 function kyivEpochMillisFor(key, minutesFromMidnight) {
@@ -983,10 +983,24 @@ function wireEvents() {
   document.getElementById('btn-install-banner').addEventListener('click', triggerInstall);
 }
 
+let swRegistration = null;
+
 // --- Boot ---
 function init() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!reloaded) {
+        reloaded = true;
+        window.location.reload();
+      }
+    });
+    navigator.serviceWorker.register('./sw.js')
+      .then((reg) => {
+        swRegistration = reg;
+        reg.update().catch(() => {});
+      })
+      .catch(() => {});
   }
 
   wireEvents();
@@ -1006,11 +1020,13 @@ function init() {
 
   setInterval(() => {
     fetchSchedule();
+    if (swRegistration) swRegistration.update().catch(() => {});
   }, AUTO_REFRESH_MS);
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && Date.now() - lastFetchAttemptMs >= AUTO_REFRESH_MS) {
       fetchSchedule();
+      if (swRegistration) swRegistration.update().catch(() => {});
     }
   });
 
