@@ -25,6 +25,11 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     private val viewModel: ScheduleViewModel by viewModels()
 
+    override fun onResume() {
+        super.onResume()
+        viewModel.refreshIfStale()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ScheduleSyncWorker.enqueuePeriodic(this)

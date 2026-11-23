@@ -1,4 +1,4 @@
-const CACHE_NAME = 'svitlo-31-pwa-v1';
+const CACHE_NAME = 'svitlo-31-pwa-v3';
 const APP_SHELL = [
   './',
   './index.html',

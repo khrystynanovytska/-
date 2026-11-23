@@ -87,12 +87,29 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
                             nowMillis = now
                         )
                     }
+                    if (now - lastNetworkAttemptMillis >= AUTO_REFRESH_INTERVAL_MS) {
+                        refreshIfStale()
+                    }
                 }
             }
         }
     }
 
+    private var lastNetworkAttemptMillis: Long = 0L
+
+    fun refreshIfStale() {
+        val now = System.currentTimeMillis()
+        if (now - lastNetworkAttemptMillis >= AUTO_REFRESH_INTERVAL_MS && !_uiState.value.isRefreshing) {
+            refresh(isManual = false)
+        }
+    }
+
+    companion object {
+        private const val AUTO_REFRESH_INTERVAL_MS = 15L * 60L * 1000L
+    }
+
     fun refresh(isManual: Boolean = true) {
+        lastNetworkAttemptMillis = System.currentTimeMillis()
         viewModelScope.launch {
             _uiState.update {
                 if (it.dataset == null) {

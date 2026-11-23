@@ -48,14 +48,14 @@ class ScheduleSyncWorker(
                     .build()
 
                 val request = PeriodicWorkRequestBuilder<ScheduleSyncWorker>(
-                    30, TimeUnit.MINUTES
+                    15, TimeUnit.MINUTES
                 )
                     .setConstraints(constraints)
                     .build()
 
                 WorkManager.getInstance(appContext).enqueueUniquePeriodicWork(
                     UNIQUE_WORK_NAME,
-                    ExistingPeriodicWorkPolicy.KEEP,
+                    ExistingPeriodicWorkPolicy.UPDATE,
                     request
                 )
             }

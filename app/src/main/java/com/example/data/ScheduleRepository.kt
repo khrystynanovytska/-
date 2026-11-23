@@ -24,11 +24,12 @@ class ScheduleRepository(
             }
 
             var lastError: Throwable? = null
+            val cacheBust = System.currentTimeMillis() / 60_000L
             for (url in FEED_URLS) {
                 try {
                     val request = Request.Builder()
-                        .url(url)
-                        .header("Cache-Control", "no-cache")
+                        .url("$url?t=$cacheBust")
+                        .header("Cache-Control", "no-cache, no-store")
                         .header("Accept", "application/json")
                         .header("User-Agent", "Svitlo31Android/1.0")
                         .build()

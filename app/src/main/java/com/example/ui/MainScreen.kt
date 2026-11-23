@@ -231,6 +231,7 @@ fun MainScreen(
 
                             SourceFooter(
                                 updatedLabel = uiState.dataset.lastUpdatedLabel,
+                                fetchedAtMillis = uiState.dataset.fetchedAtMillis,
                                 isFromCache = uiState.dataset.isFromCache
                             )
                         }
@@ -1152,6 +1153,7 @@ private fun IntervalSection(
 @Composable
 private fun SourceFooter(
     updatedLabel: String?,
+    fetchedAtMillis: Long,
     isFromCache: Boolean
 ) {
     val context = LocalContext.current
@@ -1164,7 +1166,8 @@ private fun SourceFooter(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.weight(1f)
         ) {
             Icon(
                 imageVector = Icons.Rounded.Schedule,
@@ -1172,13 +1175,22 @@ private fun SourceFooter(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(14.dp)
             )
+            val checkedAt = if (fetchedAtMillis > 0L) {
+                com.example.data.KyivTime.formatHHmm(fetchedAtMillis)
+            } else null
             val cacheSuffix = if (isFromCache) " (кеш)" else ""
+            val footerInfo = buildString {
+                if (!updatedLabel.isNullOrBlank()) {
+                    append("Графік: $updatedLabel")
+                }
+                if (checkedAt != null) {
+                    if (isNotEmpty()) append(" · ")
+                    append("Перевірено о $checkedAt")
+                }
+                append(cacheSuffix)
+            }
             Text(
-                text = if (updatedLabel != null) {
-                    stringResource(R.string.updated_at, updatedLabel) + cacheSuffix
-                } else {
-                    ""
-                },
+                text = footerInfo,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

@@ -514,15 +514,24 @@ function getCachedDataset(queueId = state.selectedQueue) {
   }
 }
 
+const AUTO_REFRESH_MS = 15 * 60 * 1000;
+let isFetching = false;
+let lastFetchAttemptMs = 0;
+
 async function fetchSchedule() {
+  if (isFetching) return;
+  isFetching = true;
+  lastFetchAttemptMs = Date.now();
+
   const refreshBtn = document.getElementById('btn-refresh');
   refreshBtn.classList.add('spinning');
   refreshBtn.disabled = true;
 
+  const cacheBust = Math.floor(Date.now() / 60000);
   let lastErr = null;
   for (const url of FEED_URLS) {
     try {
-      const resp = await fetch(url, { cache: 'no-store' });
+      const resp = await fetch(`${url}?t=${cacheBust}`, { cache: 'no-store' });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const text = await resp.text();
       const now = Date.now();
@@ -532,6 +541,7 @@ async function fetchSchedule() {
       state.dataset = parsed;
       state.error = null;
       state.isLoading = false;
+      isFetching = false;
       refreshBtn.classList.remove('spinning');
       refreshBtn.disabled = false;
       render();
@@ -541,6 +551,7 @@ async function fetchSchedule() {
     }
   }
 
+  isFetching = false;
   refreshBtn.classList.remove('spinning');
   refreshBtn.disabled = false;
 
@@ -698,13 +709,17 @@ function render() {
     dayBody.hidden = false;
 
     // 24h bar
+    const timelineKey = `${activeDay.dateKey}:${activeDay.slots.join(',')}`;
     const timelineSlots = document.getElementById('timeline-slots');
-    timelineSlots.innerHTML = '';
-    for (let i = 0; i < 48; i++) {
-      const div = document.createElement('div');
-      const st = activeDay.slots[i] || 'ON';
-      div.className = `t-slot ${st.toLowerCase()}`;
-      timelineSlots.appendChild(div);
+    if (timelineSlots.dataset.renderKey !== timelineKey) {
+      timelineSlots.dataset.renderKey = timelineKey;
+      timelineSlots.innerHTML = '';
+      for (let i = 0; i < 48; i++) {
+        const div = document.createElement('div');
+        const st = activeDay.slots[i] || 'ON';
+        div.className = `t-slot ${st.toLowerCase()}`;
+        timelineSlots.appendChild(div);
+      }
     }
 
     const nowMarker = document.getElementById('now-marker');
@@ -724,34 +739,39 @@ function render() {
 
     // Hour grid
     const hourGrid = document.getElementById('hour-grid');
-    hourGrid.innerHTML = '';
     const currentHour = isTomorrow ? -1 : Math.floor(snap.currentMinuteOfDay / 60);
+    const gridKey = `${timelineKey}:${currentHour}`;
 
-    for (let hr = 0; hr < 24; hr++) {
-      const s1 = activeDay.slots[hr * 2] || 'ON';
-      const s2 = activeDay.slots[hr * 2 + 1] || 'ON';
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = `hour-cell${hr === currentHour ? ' current' : ''}`;
-      btn.setAttribute('aria-label', `Година ${String(hr).padStart(2, '0')}:00`);
+    if (hourGrid.dataset.renderKey !== gridKey) {
+      hourGrid.dataset.renderKey = gridKey;
+      hourGrid.innerHTML = '';
 
-      const halves = document.createElement('span');
-      halves.className = 'hour-halves';
-      const h1 = document.createElement('span');
-      h1.className = `hour-half ${s1.toLowerCase()}`;
-      const h2 = document.createElement('span');
-      h2.className = `hour-half ${s2.toLowerCase()}`;
-      halves.appendChild(h1);
-      halves.appendChild(h2);
+      for (let hr = 0; hr < 24; hr++) {
+        const s1 = activeDay.slots[hr * 2] || 'ON';
+        const s2 = activeDay.slots[hr * 2 + 1] || 'ON';
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `hour-cell${hr === currentHour ? ' current' : ''}`;
+        btn.setAttribute('aria-label', `Година ${String(hr).padStart(2, '0')}:00`);
 
-      const lbl = document.createElement('span');
-      lbl.className = `hour-label ${s1 === s2 ? s1.toLowerCase() : 'mixed'}`;
-      lbl.textContent = `${String(hr).padStart(2, '0')}:00`;
+        const halves = document.createElement('span');
+        halves.className = 'hour-halves';
+        const h1 = document.createElement('span');
+        h1.className = `hour-half ${s1.toLowerCase()}`;
+        const h2 = document.createElement('span');
+        h2.className = `hour-half ${s2.toLowerCase()}`;
+        halves.appendChild(h1);
+        halves.appendChild(h2);
 
-      btn.appendChild(halves);
-      btn.appendChild(lbl);
-      btn.addEventListener('click', () => openHourModal(activeDay.dateKey, hr));
-      hourGrid.appendChild(btn);
+        const lbl = document.createElement('span');
+        lbl.className = `hour-label ${s1 === s2 ? s1.toLowerCase() : 'mixed'}`;
+        lbl.textContent = `${String(hr).padStart(2, '0')}:00`;
+
+        btn.appendChild(halves);
+        btn.appendChild(lbl);
+        btn.addEventListener('click', () => openHourModal(activeDay.dateKey, hr));
+        hourGrid.appendChild(btn);
+      }
     }
   }
 
@@ -790,10 +810,15 @@ function render() {
     : (offRanges.length === 0 ? 'Відсутні' : offRanges.map(formatRange).join(', '));
 
   // Footer
-  const updatedText = state.dataset.lastUpdatedLabel
-    ? `Оновлено ${state.dataset.lastUpdatedLabel}${state.dataset.isFromCache ? ' (кеш)' : ''}`
-    : '';
-  document.getElementById('footer-updated').textContent = updatedText;
+  const parts = [];
+  if (state.dataset.lastUpdatedLabel) {
+    parts.push(`Графік: ${state.dataset.lastUpdatedLabel}`);
+  }
+  if (state.dataset.fetchedAtMillis > 0) {
+    parts.push(`Перевірено о ${formatHHmmFromMillis(state.dataset.fetchedAtMillis)}`);
+  }
+  const cacheSuffix = state.dataset.isFromCache ? ' (кеш)' : '';
+  document.getElementById('footer-updated').textContent = parts.join(' · ') + cacheSuffix;
 }
 
 // --- Modals & Actions ---
@@ -978,6 +1003,20 @@ function init() {
   setInterval(() => {
     if (state.dataset) render();
   }, 1000);
+
+  setInterval(() => {
+    fetchSchedule();
+  }, AUTO_REFRESH_MS);
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && Date.now() - lastFetchAttemptMs >= AUTO_REFRESH_MS) {
+      fetchSchedule();
+    }
+  });
+
+  window.addEventListener('online', () => {
+    fetchSchedule();
+  });
 }
 
 init();
