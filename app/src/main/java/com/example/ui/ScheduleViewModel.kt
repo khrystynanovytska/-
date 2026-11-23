@@ -7,8 +7,10 @@ import com.example.data.KyivTime
 import com.example.data.PowerScheduleParser
 import com.example.data.SchedulePreferences
 import com.example.data.ScheduleRepository
+import com.example.model.KyivDate
 import com.example.model.PowerStatusSnapshot
 import com.example.model.ScheduleDataset
+import com.example.model.SlotState
 import com.example.notifications.OutageAlarmScheduler
 import com.example.notifications.OutageNotificationHelper
 import com.example.widget.PowerStatusWidgetProvider
@@ -57,12 +59,13 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
     private fun loadInitialAndStartTicker() {
         repository.getCachedDataset()?.let { cached ->
             val now = System.currentTimeMillis()
+            val override = prefs.getActiveManualOverride(now)
             _uiState.update {
                 it.copy(
                     isLoading = false,
                     availableQueues = cached.availableQueues,
                     dataset = cached,
-                    snapshot = PowerScheduleParser.computeSnapshot(cached, now),
+                    snapshot = PowerScheduleParser.computeSnapshot(cached, now, override),
                     nowMillis = now
                 )
             }
@@ -77,9 +80,10 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
                 val now = System.currentTimeMillis()
                 val currentDataset = _uiState.value.dataset
                 if (currentDataset != null) {
+                    val override = prefs.getActiveManualOverride(now)
                     _uiState.update {
                         it.copy(
-                            snapshot = PowerScheduleParser.computeSnapshot(currentDataset, now),
+                            snapshot = PowerScheduleParser.computeSnapshot(currentDataset, now, override),
                             nowMillis = now
                         )
                     }
@@ -100,10 +104,11 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
 
             val result = repository.fetchSchedule(forceNetwork = true)
             val now = System.currentTimeMillis()
+            val override = prefs.getActiveManualOverride(now)
 
             result.fold(
                 onSuccess = { dataset ->
-                    val snapshot = PowerScheduleParser.computeSnapshot(dataset, now)
+                    val snapshot = PowerScheduleParser.computeSnapshot(dataset, now, override)
                     val keepTomorrow = _uiState.value.selectedTomorrow && snapshot.tomorrowSchedule != null
                     _uiState.update {
                         it.copy(
@@ -137,16 +142,71 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun setManualLiveStatus(state: SlotState?) {
+        val now = System.currentTimeMillis()
+        val dataset = _uiState.value.dataset ?: return
+        if (state == null) {
+            prefs.setManualStatusOverride(null, 0L)
+        } else {
+            val blockEnd = PowerScheduleParser.computeCurrentBlockEndMillis(dataset, now)
+            val expiresAt = maxOf(blockEnd, now + 30L * 60L * 1000L)
+            prefs.setManualStatusOverride(state, expiresAt)
+        }
+
+        val activeOverride = prefs.getActiveManualOverride(now)
+        val snapshot = PowerScheduleParser.computeSnapshot(dataset, now, activeOverride)
+        _uiState.update {
+            it.copy(
+                snapshot = snapshot,
+                nowMillis = now
+            )
+        }
+        PowerStatusWidgetProvider.updateAllWidgets(context, dataset, now)
+    }
+
+    fun setManualHourState(date: KyivDate, hour: Int, state: SlotState?) {
+        val queueId = _uiState.value.selectedQueue
+        prefs.setHourOverride(queueId, date, hour, state)
+        reapplyMergedDataset(queueId)
+    }
+
+    fun clearManualDayEdits(date: KyivDate) {
+        val queueId = _uiState.value.selectedQueue
+        prefs.clearDaySlotOverrides(queueId, date)
+        reapplyMergedDataset(queueId)
+    }
+
+    fun getHourManualOverride(date: KyivDate, hour: Int): SlotState? {
+        return prefs.getHourOverride(_uiState.value.selectedQueue, date, hour)
+    }
+
+    private fun reapplyMergedDataset(queueId: String) {
+        val now = System.currentTimeMillis()
+        val merged = repository.getCachedDataset(queueId = queueId) ?: return
+        val override = prefs.getActiveManualOverride(now)
+        val snapshot = PowerScheduleParser.computeSnapshot(merged, now, override)
+        _uiState.update {
+            it.copy(
+                dataset = merged,
+                snapshot = snapshot,
+                nowMillis = now
+            )
+        }
+        OutageAlarmScheduler.rescheduleAlerts(context, merged, now)
+        PowerStatusWidgetProvider.updateAllWidgets(context, merged, now)
+    }
+
     fun selectQueue(queueId: String, customAddress: String) {
         val cleanedAddress = customAddress.trim()
         prefs.selectedQueue = queueId
         prefs.addressLabel = cleanedAddress
         prefs.lastNotifiedOutageStartMillis = 0L
+        prefs.setManualStatusOverride(null, 0L)
 
         val now = System.currentTimeMillis()
         val reparsed = repository.getCachedDataset(queueId = queueId)
         if (reparsed != null) {
-            val snapshot = PowerScheduleParser.computeSnapshot(reparsed, now)
+            val snapshot = PowerScheduleParser.computeSnapshot(reparsed, now, null)
             _uiState.update {
                 it.copy(
                     selectedQueue = queueId,

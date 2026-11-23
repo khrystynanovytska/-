@@ -2,8 +2,8 @@ package com.example.model
 
 enum class SlotState {
     ON,
-    OFF,
-    MAYBE;
+    MAYBE,
+    OFF;
 
     val isPowerAvailable: Boolean
         get() = this == ON
@@ -44,8 +44,11 @@ data class KyivDate(
 data class TimeRange(
     val startMinute: Int, // 0..1440
     val endMinute: Int,   // 0..1440
-    val isOn: Boolean
+    val state: SlotState
 ) {
+    val isOn: Boolean
+        get() = state == SlotState.ON
+
     val durationMinutes: Int
         get() = (endMinute - startMinute).coerceAtLeast(0)
 
@@ -63,16 +66,20 @@ data class TimeRange(
 
 data class DaySchedule(
     val date: KyivDate,
-    val slots: List<SlotState> // size 48, each 30 min
+    val slots: List<SlotState>, // size 48, each 30 min
+    val hasManualEdits: Boolean = false
 ) {
-    val hasAnyOutage: Boolean
-        get() = slots.any { !it.isPowerAvailable }
+    val hasAnyInterruption: Boolean
+        get() = slots.any { it != SlotState.ON }
 
     val totalOnMinutes: Int
-        get() = slots.count { it.isPowerAvailable } * 30
+        get() = slots.count { it == SlotState.ON } * 30
+
+    val totalMaybeMinutes: Int
+        get() = slots.count { it == SlotState.MAYBE } * 30
 
     val totalOffMinutes: Int
-        get() = slots.count { !it.isPowerAvailable } * 30
+        get() = slots.count { it == SlotState.OFF } * 30
 }
 
 data class ScheduleDataset(
@@ -99,22 +106,36 @@ data class OutageTransition(
     val outageStartMillis: Long,
     val outageEndMillis: Long?,
     val offTimeFormatted: String,
-    val backOnTimeFormatted: String?
+    val backOnTimeFormatted: String?,
+    val isMaybe: Boolean = false
+)
+
+data class ManualStatusOverride(
+    val state: SlotState, // ON or OFF
+    val expiresAtMillis: Long
 )
 
 data class PowerStatusSnapshot(
     val todaySchedule: DaySchedule?,
     val tomorrowSchedule: DaySchedule?,
-    val isPowerOn: Boolean,
-    val currentSlotState: SlotState,
+    val effectiveState: SlotState,
+    val scheduleState: SlotState,
+    val isManualOverride: Boolean,
     val remainingSeconds: Long, // -1L when no scheduled change in today/tomorrow window
-    val blockProgress: Float,   // 0f..1f within current ON or OFF block
+    val blockProgress: Float,   // 0f..1f within current block
     val nextChangeTimeLabel: String?,
+    val nextChangeTargetState: SlotState?,
     val todayOnMinutes: Int,
+    val todayMaybeMinutes: Int,
     val todayOffMinutes: Int,
     val todayOnRanges: List<TimeRange>,
+    val todayMaybeRanges: List<TimeRange>,
     val todayOffRanges: List<TimeRange>,
     val tomorrowOnRanges: List<TimeRange>,
+    val tomorrowMaybeRanges: List<TimeRange>,
     val tomorrowOffRanges: List<TimeRange>,
     val currentMinuteOfDay: Int
-)
+) {
+    val isPowerOn: Boolean
+        get() = effectiveState == SlotState.ON
+}

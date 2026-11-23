@@ -40,6 +40,7 @@ object OutageAlarmScheduler {
                     putExtra(OutageAlarmReceiver.EXTRA_OUTAGE_START_MILLIS, transition.outageStartMillis)
                     putExtra(OutageAlarmReceiver.EXTRA_QUEUE_ID, dataset.queueId)
                     putExtra(OutageAlarmReceiver.EXTRA_ADDRESS_LABEL, prefs.addressLabel)
+                    putExtra(OutageAlarmReceiver.EXTRA_IS_MAYBE, transition.isMaybe)
                 }
                 val pendingIntent = PendingIntent.getBroadcast(
                     context,
@@ -63,7 +64,8 @@ object OutageAlarmScheduler {
                         backOnTime = transition.backOnTimeFormatted,
                         outageStartMillis = transition.outageStartMillis,
                         queueId = dataset.queueId,
-                        addressLabel = prefs.addressLabel
+                        addressLabel = prefs.addressLabel,
+                        isMaybe = transition.isMaybe
                     )
                 }
             }

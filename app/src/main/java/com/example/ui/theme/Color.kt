@@ -33,5 +33,8 @@ val PowerOffRedBright = Color(0xFFEF4444)
 val PowerOffRedSoftLight = Color(0xFFFEE2E2)
 val PowerOffRedSoftDark = Color(0xFF7F1D1D)
 
+val PowerMaybeAmberStart = Color(0xFFB45309)
+val PowerMaybeAmberEnd = Color(0xFFD97706)
 val AmberWarning = Color(0xFFF59E0B)
 val AmberWarningSoft = Color(0xFFFEF3C7)
+val PowerMaybeAmberSoftDark = Color(0xFF78350F)

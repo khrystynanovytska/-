@@ -6,11 +6,13 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.KyivTime
 import com.example.data.PowerScheduleParser
 import com.example.model.DaySchedule
+import com.example.model.KyivDate
 import com.example.model.ScheduleDataset
 import com.example.model.SlotState
 import com.example.ui.MainScreen
@@ -135,5 +137,70 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("countdown_timer_text")
             .assertIsDisplayed()
             .assertTextContains("02:30:00")
+    }
+
+    @Test
+    fun `main screen displays maybe period, supports manual status and hour editing`() {
+        val nowMillis = 1795420800_000L
+        val today = KyivTime.todayDate(nowMillis)
+        val slots = MutableList(48) { SlotState.ON }
+        for (i in 20..23) slots[i] = SlotState.MAYBE // 10:00 - 12:00
+
+        val daySchedule = DaySchedule(date = today, slots = slots)
+        val dataset = ScheduleDataset(
+            days = mapOf(today to daySchedule),
+            lastUpdatedLabel = "23.11 10:00",
+            fetchedAtMillis = nowMillis,
+            isFromCache = false
+        )
+        val at1030 = KyivTime.epochMillisFor(today, 10 * 60 + 30)
+        val snapshot = PowerScheduleParser.computeSnapshot(dataset, at1030)
+
+        var manualStatusSelected: SlotState? = null
+        var editedTarget: Triple<KyivDate, Int, SlotState?>? = null
+
+        composeTestRule.setContent {
+            SvitloTheme {
+                MainScreen(
+                    uiState = ScheduleUiState(
+                        isLoading = false,
+                        dataset = dataset,
+                        snapshot = snapshot,
+                        nowMillis = at1030
+                    ),
+                    snackbarHostState = SnackbarHostState(),
+                    todayDateLabel = today.formatUkrainianShort(),
+                    tomorrowDateLabel = KyivTime.nextDay(today).formatUkrainianShort(),
+                    onRefresh = {},
+                    onSelectDay = {},
+                    onToggleNotifications = {},
+                    onSetManualLiveStatus = { manualStatusSelected = it },
+                    onEditHourState = { d, h, s -> editedTarget = Triple(d, h, s) }
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("power_status_headline")
+            .assertIsDisplayed()
+            .assertTextContains("МОЖЛИВЕ ВІДКЛЮЧЕННЯ")
+
+        composeTestRule.onNodeWithTag("manual_on_button")
+            .performScrollTo()
+            .performClick()
+        assertEquals(SlotState.ON, manualStatusSelected)
+
+        composeTestRule.onNodeWithTag("hour_cell_14")
+            .performScrollTo()
+            .performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("edit_hour_maybe").performClick()
+        assertEquals(Triple(today, 14, SlotState.MAYBE), editedTarget)
+
+        composeTestRule.onNodeWithTag("power_maybe_intervals_text")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertTextContains("10:00 – 12:00")
     }
 }

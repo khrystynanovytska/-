@@ -46,4 +46,21 @@
     <string name="widget_timer_prefix">До зміни: </string>
     <string name="widget_no_outages">Без відключень</string>
     <string name="widget_loading">Натисніть для оновлення</string>
+    <string name="status_maybe_off">МОЖЛИВЕ ВІДКЛЮЧЕННЯ</string>
+    <string name="daily_maybe_off">Можливі</string>
+    <string name="legend_maybe">Можливе</string>
+    <string name="text_power_maybe_today">Можливі відключення сьогодні:</string>
+    <string name="text_power_maybe_tomorrow">Можливі відключення завтра:</string>
+    <string name="manual_status_title">Зараз насправді:</string>
+    <string name="manual_btn_on">Є світло</string>
+    <string name="manual_btn_off">Нема світла</string>
+    <string name="manual_btn_auto">За графіком</string>
+    <string name="manual_badge">Вказано вручну</string>
+    <string name="tap_hour_hint">Натисніть на годину, щоб змінити стан вручну</string>
+    <string name="reset_manual_edits">Скинути</string>
+    <string name="edit_hour_title">Година %1$s</string>
+    <string name="option_power_on">Є світло</string>
+    <string name="option_possible_outage">Період можливих відключень</string>
+    <string name="option_power_off">Нема світла (відключення)</string>
+    <string name="option_reset_hour">Повернути за графіком</string>
 </resources>

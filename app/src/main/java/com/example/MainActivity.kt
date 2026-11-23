@@ -75,6 +75,18 @@ class MainActivity : ComponentActivity() {
                     onSelectQueue = { queueId, address ->
                         viewModel.selectQueue(queueId, address)
                     },
+                    onSetManualLiveStatus = { state ->
+                        viewModel.setManualLiveStatus(state)
+                    },
+                    onEditHourState = { date, hour, state ->
+                        viewModel.setManualHourState(date, hour, state)
+                    },
+                    onClearManualDayEdits = { date ->
+                        viewModel.clearManualDayEdits(date)
+                    },
+                    isHourManuallyEdited = { date, hour ->
+                        viewModel.getHourManualOverride(date, hour) != null
+                    },
                     onToggleNotifications = {
                         val currentlyActive =
                             uiState.notificationsEnabled && uiState.hasNotificationPermission

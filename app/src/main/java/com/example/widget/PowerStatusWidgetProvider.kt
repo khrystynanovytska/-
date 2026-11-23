@@ -15,7 +15,9 @@ import com.example.R
 import com.example.data.PowerScheduleParser
 import com.example.data.SchedulePreferences
 import com.example.data.ScheduleRepository
+import com.example.model.ManualStatusOverride
 import com.example.model.ScheduleDataset
+import com.example.model.SlotState
 import com.example.notifications.OutageAlarmScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,9 +35,10 @@ class PowerStatusWidgetProvider : AppWidgetProvider() {
         val repository = ScheduleRepository(context, prefs)
         val cached = repository.getCachedDataset()
         val now = System.currentTimeMillis()
+        val manualOverride = prefs.getActiveManualOverride(now)
 
-        renderWidgets(context, appWidgetManager, appWidgetIds, cached, prefs.selectedQueue, now)
-        scheduleNextTransitionUpdate(context, cached, now)
+        renderWidgets(context, appWidgetManager, appWidgetIds, cached, prefs.selectedQueue, now, manualOverride)
+        scheduleNextTransitionUpdate(context, cached, now, manualOverride)
 
         val cacheAgeMs = cached?.let { now - it.fetchedAtMillis } ?: Long.MAX_VALUE
         if (cached == null || cacheAgeMs > CACHE_STALE_MS) {
@@ -94,6 +97,7 @@ class PowerStatusWidgetProvider : AppWidgetProvider() {
 
             val prefs = SchedulePreferences(appContext)
             val dataset = providedDataset ?: ScheduleRepository(appContext, prefs).getCachedDataset()
+            val manualOverride = prefs.getActiveManualOverride(nowMillis)
 
             renderWidgets(
                 context = appContext,
@@ -101,9 +105,10 @@ class PowerStatusWidgetProvider : AppWidgetProvider() {
                 appWidgetIds = appWidgetIds,
                 dataset = dataset,
                 selectedQueue = prefs.selectedQueue,
-                nowMillis = nowMillis
+                nowMillis = nowMillis,
+                manualOverride = manualOverride
             )
-            scheduleNextTransitionUpdate(appContext, dataset, nowMillis)
+            scheduleNextTransitionUpdate(appContext, dataset, nowMillis, manualOverride)
         }
 
         internal fun buildRemoteViews(
@@ -111,15 +116,14 @@ class PowerStatusWidgetProvider : AppWidgetProvider() {
             dataset: ScheduleDataset?,
             selectedQueue: String,
             nowMillis: Long = System.currentTimeMillis(),
-            elapsedRealtimeMillis: Long = SystemClock.elapsedRealtime()
+            elapsedRealtimeMillis: Long = SystemClock.elapsedRealtime(),
+            manualOverride: ManualStatusOverride? = null
         ): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.widget_power_status)
 
-            // Queue badge
             val queueText = context.getString(R.string.queue_format, dataset?.queueId ?: selectedQueue)
             views.setTextViewText(R.id.widget_queue_badge, queueText)
 
-            // Click on widget opens app
             val openAppIntent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
@@ -131,7 +135,6 @@ class PowerStatusWidgetProvider : AppWidgetProvider() {
             )
             views.setOnClickPendingIntent(R.id.widget_root, openAppPendingIntent)
 
-            // Click on refresh icon refreshes widget
             val refreshIntent = Intent(context, PowerStatusWidgetProvider::class.java).apply {
                 action = ACTION_REFRESH_WIDGET
             }
@@ -157,14 +160,18 @@ class PowerStatusWidgetProvider : AppWidgetProvider() {
                 return views
             }
 
-            val snapshot = PowerScheduleParser.computeSnapshot(dataset, nowMillis)
-            val bgRes = if (snapshot.isPowerOn) R.drawable.widget_bg_on else R.drawable.widget_bg_off
+            val snapshot = PowerScheduleParser.computeSnapshot(dataset, nowMillis, manualOverride)
+            val bgRes = when (snapshot.effectiveState) {
+                SlotState.ON -> R.drawable.widget_bg_on
+                SlotState.MAYBE -> R.drawable.widget_bg_maybe
+                SlotState.OFF -> R.drawable.widget_bg_off
+            }
             views.setInt(R.id.widget_root, "setBackgroundResource", bgRes)
 
-            val statusText = if (snapshot.isPowerOn) {
-                context.getString(R.string.status_power_on)
-            } else {
-                context.getString(R.string.status_power_off)
+            val statusText = when (snapshot.effectiveState) {
+                SlotState.ON -> context.getString(R.string.status_power_on)
+                SlotState.MAYBE -> context.getString(R.string.status_maybe_off)
+                SlotState.OFF -> context.getString(R.string.status_power_off)
             }
             views.setTextViewText(R.id.widget_status_text, statusText)
 
@@ -191,13 +198,17 @@ class PowerStatusWidgetProvider : AppWidgetProvider() {
                 views.setChronometer(R.id.widget_chronometer, targetElapsed, null, true)
 
                 if (snapshot.nextChangeTimeLabel != null) {
-                    val nextLabel = if (snapshot.isPowerOn) {
-                        context.getString(R.string.next_off_at, snapshot.nextChangeTimeLabel)
-                    } else {
-                        context.getString(R.string.next_on_at, snapshot.nextChangeTimeLabel)
+                    val nextLabel = when (snapshot.nextChangeTargetState) {
+                        SlotState.ON -> context.getString(R.string.next_on_at, snapshot.nextChangeTimeLabel)
+                        SlotState.MAYBE -> "Можливе вимкн. о ${snapshot.nextChangeTimeLabel}"
+                        SlotState.OFF, null -> context.getString(R.string.next_off_at, snapshot.nextChangeTimeLabel)
                     }
+                    val suffix = if (snapshot.isManualOverride) " · вручну" else ""
                     views.setViewVisibility(R.id.widget_next_time_text, View.VISIBLE)
-                    views.setTextViewText(R.id.widget_next_time_text, nextLabel)
+                    views.setTextViewText(R.id.widget_next_time_text, nextLabel + suffix)
+                } else if (snapshot.isManualOverride) {
+                    views.setViewVisibility(R.id.widget_next_time_text, View.VISIBLE)
+                    views.setTextViewText(R.id.widget_next_time_text, context.getString(R.string.manual_badge))
                 } else {
                     views.setViewVisibility(R.id.widget_next_time_text, View.GONE)
                 }
@@ -221,9 +232,16 @@ class PowerStatusWidgetProvider : AppWidgetProvider() {
             appWidgetIds: IntArray,
             dataset: ScheduleDataset?,
             selectedQueue: String,
-            nowMillis: Long
+            nowMillis: Long,
+            manualOverride: ManualStatusOverride?
         ) {
-            val views = buildRemoteViews(context, dataset, selectedQueue, nowMillis)
+            val views = buildRemoteViews(
+                context = context,
+                dataset = dataset,
+                selectedQueue = selectedQueue,
+                nowMillis = nowMillis,
+                manualOverride = manualOverride
+            )
             appWidgetIds.forEach { widgetId ->
                 appWidgetManager.updateAppWidget(widgetId, views)
             }
@@ -232,12 +250,13 @@ class PowerStatusWidgetProvider : AppWidgetProvider() {
         private fun scheduleNextTransitionUpdate(
             context: Context,
             dataset: ScheduleDataset?,
-            nowMillis: Long
+            nowMillis: Long,
+            manualOverride: ManualStatusOverride?
         ) {
             cancelTransitionUpdate(context)
             if (dataset == null) return
 
-            val snapshot = PowerScheduleParser.computeSnapshot(dataset, nowMillis)
+            val snapshot = PowerScheduleParser.computeSnapshot(dataset, nowMillis, manualOverride)
             if (snapshot.remainingSeconds <= 0L) return
 
             val triggerAtMillis = nowMillis + snapshot.remainingSeconds * 1000L + 1500L

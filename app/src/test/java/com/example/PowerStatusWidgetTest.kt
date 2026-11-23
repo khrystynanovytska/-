@@ -8,6 +8,7 @@ import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.KyivTime
 import com.example.model.DaySchedule
+import com.example.model.ManualStatusOverride
 import com.example.model.ScheduleDataset
 import com.example.model.SlotState
 import com.example.widget.PowerStatusWidgetProvider
@@ -140,6 +141,58 @@ class PowerStatusWidgetTest {
         assertEquals(
             "Без відключень",
             inflated.findViewById<TextView>(R.id.widget_static_subtext).text.toString()
+        )
+    }
+
+    @Test
+    fun `widget displays maybe period and manual override`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val nowMillis = 1795420800_000L
+        val today = KyivTime.todayDate(nowMillis)
+        val slots = MutableList(48) { SlotState.ON }
+        for (i in 20..23) slots[i] = SlotState.MAYBE // 10:00 - 12:00
+
+        val dataset = ScheduleDataset(
+            queueId = "3.1",
+            days = mapOf(today to DaySchedule(today, slots)),
+            lastUpdatedLabel = "23.11 10:00",
+            fetchedAtMillis = nowMillis,
+            isFromCache = false
+        )
+        val at1030 = KyivTime.epochMillisFor(today, 10 * 60 + 30)
+
+        val remoteViewsMaybe = PowerStatusWidgetProvider.buildRemoteViews(
+            context = context,
+            dataset = dataset,
+            selectedQueue = "3.1",
+            nowMillis = at1030
+        )
+        val inflatedMaybe = remoteViewsMaybe.apply(context, FrameLayout(context))
+        assertEquals(
+            "МОЖЛИВЕ ВІДКЛЮЧЕННЯ",
+            inflatedMaybe.findViewById<TextView>(R.id.widget_status_text).text.toString()
+        )
+        assertEquals(
+            "Увімкнення о 12:00",
+            inflatedMaybe.findViewById<TextView>(R.id.widget_next_time_text).text.toString()
+        )
+
+        val at1200 = KyivTime.epochMillisFor(today, 12 * 60)
+        val remoteViewsManual = PowerStatusWidgetProvider.buildRemoteViews(
+            context = context,
+            dataset = dataset,
+            selectedQueue = "3.1",
+            nowMillis = at1030,
+            manualOverride = ManualStatusOverride(SlotState.ON, at1200)
+        )
+        val inflatedManual = remoteViewsManual.apply(context, FrameLayout(context))
+        assertEquals(
+            "Є СВІТЛО",
+            inflatedManual.findViewById<TextView>(R.id.widget_status_text).text.toString()
+        )
+        val manualSubtext = inflatedManual.findViewById<TextView>(R.id.widget_next_time_text).text.toString()
+        assertTrue(
+            manualSubtext.contains("вручну", ignoreCase = true)
         )
     }
 }

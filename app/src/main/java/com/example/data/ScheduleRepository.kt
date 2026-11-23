@@ -47,14 +47,13 @@ class ScheduleRepository(
                             isFromCache = false
                         )
                         prefs.saveCachedJson(body, now)
-                        return@withContext Result.success(parsed)
+                        return@withContext Result.success(prefs.applyManualSlotOverrides(parsed))
                     }
                 } catch (t: Throwable) {
                     lastError = t
                 }
             }
 
-            // Fallback to cached schedule if network failed
             getCachedDataset()?.let { cached ->
                 return@withContext Result.success(cached)
             }
@@ -65,19 +64,19 @@ class ScheduleRepository(
     fun getCachedDataset(queueId: String = prefs.selectedQueue): ScheduleDataset? {
         val (json, fetchedAt) = prefs.getCachedJson() ?: return null
         return try {
-            PowerScheduleParser.parseJson(
+            val parsed = PowerScheduleParser.parseJson(
                 rawJson = json,
                 queueId = queueId,
                 fetchedAtMillis = fetchedAt,
                 isFromCache = true
             )
+            prefs.applyManualSlotOverrides(parsed)
         } catch (_: Throwable) {
             null
         }
     }
 
     companion object {
-        // Structured real-time mirrors scraped from https://poweron.toe.com.ua/
         private val FEED_URLS = listOf(
             "https://raw.githubusercontent.com/yaroslav2901/OE_OUTAGE_DATA/main/data/Ternopiloblenerho.json",
             "https://raw.githubusercontent.com/Baskerville42/outage-data-ua/main/data/ternopiloblenergo.json"

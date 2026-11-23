@@ -13,6 +13,8 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -38,6 +40,8 @@ import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -47,12 +51,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -80,11 +86,16 @@ import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.ScheduleRepository
 import com.example.model.DaySchedule
+import com.example.model.KyivDate
 import com.example.model.PowerStatusSnapshot
 import com.example.model.SlotState
 import com.example.model.TimeRange
 import com.example.ui.theme.AmberWarning
+import com.example.ui.theme.AmberWarningSoft
 import com.example.ui.theme.JetBrainsMonoFontFamily
+import com.example.ui.theme.PowerMaybeAmberEnd
+import com.example.ui.theme.PowerMaybeAmberSoftDark
+import com.example.ui.theme.PowerMaybeAmberStart
 import com.example.ui.theme.PowerOffRedBright
 import com.example.ui.theme.PowerOffRedEnd
 import com.example.ui.theme.PowerOffRedSoftDark
@@ -106,9 +117,14 @@ fun MainScreen(
     onRefresh: () -> Unit,
     onSelectDay: (Boolean) -> Unit,
     onToggleNotifications: () -> Unit,
-    onSelectQueue: (String, String) -> Unit = { _, _ -> }
+    onSelectQueue: (String, String) -> Unit = { _, _ -> },
+    onSetManualLiveStatus: (SlotState?) -> Unit = {},
+    onEditHourState: (KyivDate, Int, SlotState?) -> Unit = { _, _, _ -> },
+    onClearManualDayEdits: (KyivDate) -> Unit = {},
+    isHourManuallyEdited: (KyivDate, Int) -> Boolean = { _, _ -> false }
 ) {
     var showQueueSheet by remember { mutableStateOf(false) }
+    var editingHourTarget by remember { mutableStateOf<Pair<KyivDate, Int>?>(null) }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -171,13 +187,21 @@ fun MainScreen(
                             } else {
                                 snapshot.todayOnRanges
                             }
+                            val activeMaybeRanges = if (isViewingTomorrow) {
+                                snapshot.tomorrowMaybeRanges
+                            } else {
+                                snapshot.todayMaybeRanges
+                            }
                             val activeOffRanges = if (isViewingTomorrow) {
                                 snapshot.tomorrowOffRanges
                             } else {
                                 snapshot.todayOffRanges
                             }
 
-                            HeroStatusCard(snapshot = snapshot)
+                            HeroStatusCard(
+                                snapshot = snapshot,
+                                onSetManualLiveStatus = onSetManualLiveStatus
+                            )
 
                             DailyScheduleCard(
                                 daySchedule = activeDaySchedule,
@@ -186,13 +210,22 @@ fun MainScreen(
                                 todayDateLabel = todayDateLabel,
                                 tomorrowDateLabel = tomorrowDateLabel,
                                 currentMinuteOfDay = snapshot.currentMinuteOfDay,
-                                onSelectDay = onSelectDay
+                                onSelectDay = onSelectDay,
+                                onHourClick = { hour ->
+                                    activeDaySchedule?.date?.let { date ->
+                                        editingHourTarget = date to hour
+                                    }
+                                },
+                                onResetManualEdits = {
+                                    activeDaySchedule?.date?.let(onClearManualDayEdits)
+                                }
                             )
 
                             TextIntervalsCard(
                                 isViewingTomorrow = isViewingTomorrow,
                                 hasDayData = activeDaySchedule != null,
                                 onRanges = activeOnRanges,
+                                maybeRanges = activeMaybeRanges,
                                 offRanges = activeOffRanges
                             )
 
@@ -218,6 +251,18 @@ fun MainScreen(
             onConfirm = { queueId, address ->
                 showQueueSheet = false
                 onSelectQueue(queueId, address)
+            }
+        )
+    }
+
+    editingHourTarget?.let { (date, hour) ->
+        EditHourDialog(
+            hour = hour,
+            hasManualOverride = isHourManuallyEdited(date, hour),
+            onDismiss = { editingHourTarget = null },
+            onSelectState = { chosenState ->
+                editingHourTarget = null
+                onEditHourState(date, hour, chosenState)
             }
         )
     }
@@ -318,15 +363,30 @@ private fun HeaderBar(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun HeroStatusCard(snapshot: PowerStatusSnapshot) {
+private fun HeroStatusCard(
+    snapshot: PowerStatusSnapshot,
+    onSetManualLiveStatus: (SlotState?) -> Unit
+) {
+    val targetStart = when (snapshot.effectiveState) {
+        SlotState.ON -> PowerOnGreenStart
+        SlotState.MAYBE -> PowerMaybeAmberStart
+        SlotState.OFF -> PowerOffRedStart
+    }
+    val targetEnd = when (snapshot.effectiveState) {
+        SlotState.ON -> PowerOnGreenEnd
+        SlotState.MAYBE -> PowerMaybeAmberEnd
+        SlotState.OFF -> PowerOffRedEnd
+    }
+
     val startColor by animateColorAsState(
-        targetValue = if (snapshot.isPowerOn) PowerOnGreenStart else PowerOffRedStart,
+        targetValue = targetStart,
         animationSpec = tween(durationMillis = 350),
         label = "heroStart"
     )
     val endColor by animateColorAsState(
-        targetValue = if (snapshot.isPowerOn) PowerOnGreenEnd else PowerOffRedEnd,
+        targetValue = targetEnd,
         animationSpec = tween(durationMillis = 350),
         label = "heroEnd"
     )
@@ -374,8 +434,8 @@ private fun HeroStatusCard(snapshot: PowerStatusSnapshot) {
                                     .background(Color.White)
                             )
                             Text(
-                                text = if (snapshot.currentSlotState == SlotState.MAYBE) {
-                                    stringResource(R.string.status_maybe_off_hint)
+                                text = if (snapshot.isManualOverride) {
+                                    stringResource(R.string.manual_badge)
                                 } else {
                                     "Зараз"
                                 },
@@ -386,15 +446,15 @@ private fun HeroStatusCard(snapshot: PowerStatusSnapshot) {
                     }
 
                     Icon(
-                        imageVector = if (snapshot.isPowerOn) {
-                            Icons.Rounded.Bolt
-                        } else {
-                            Icons.Rounded.FlashOff
+                        imageVector = when (snapshot.effectiveState) {
+                            SlotState.ON -> Icons.Rounded.Bolt
+                            SlotState.MAYBE -> Icons.Rounded.WarningAmber
+                            SlotState.OFF -> Icons.Rounded.FlashOff
                         },
-                        contentDescription = if (snapshot.isPowerOn) {
-                            stringResource(R.string.status_power_on)
-                        } else {
-                            stringResource(R.string.status_power_off)
+                        contentDescription = when (snapshot.effectiveState) {
+                            SlotState.ON -> stringResource(R.string.status_power_on)
+                            SlotState.MAYBE -> stringResource(R.string.status_maybe_off)
+                            SlotState.OFF -> stringResource(R.string.status_power_off)
                         },
                         tint = Color.White.copy(alpha = 0.92f),
                         modifier = Modifier.size(30.dp)
@@ -402,13 +462,13 @@ private fun HeroStatusCard(snapshot: PowerStatusSnapshot) {
                 }
 
                 Text(
-                    text = if (snapshot.isPowerOn) {
-                        stringResource(R.string.status_power_on)
-                    } else {
-                        stringResource(R.string.status_power_off)
+                    text = when (snapshot.effectiveState) {
+                        SlotState.ON -> stringResource(R.string.status_power_on)
+                        SlotState.MAYBE -> stringResource(R.string.status_maybe_off)
+                        SlotState.OFF -> stringResource(R.string.status_power_off)
                     },
                     style = MaterialTheme.typography.displaySmall.copy(
-                        fontSize = 34.sp,
+                        fontSize = if (snapshot.effectiveState == SlotState.MAYBE) 26.sp else 34.sp,
                         fontWeight = FontWeight.ExtraBold
                     ),
                     color = Color.White,
@@ -425,10 +485,10 @@ private fun HeroStatusCard(snapshot: PowerStatusSnapshot) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (snapshot.remainingSeconds >= 0L) {
                             Text(
-                                text = if (snapshot.isPowerOn) {
-                                    stringResource(R.string.timer_power_on_prefix)
-                                } else {
-                                    stringResource(R.string.timer_power_off_prefix)
+                                text = when (snapshot.effectiveState) {
+                                    SlotState.ON -> stringResource(R.string.timer_power_on_prefix)
+                                    SlotState.MAYBE -> "Період можливих відключень ще:"
+                                    SlotState.OFF -> stringResource(R.string.timer_power_off_prefix)
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = Color.White.copy(alpha = 0.88f)
@@ -448,10 +508,10 @@ private fun HeroStatusCard(snapshot: PowerStatusSnapshot) {
 
                             if (snapshot.nextChangeTimeLabel != null) {
                                 Text(
-                                    text = if (snapshot.isPowerOn) {
-                                        stringResource(R.string.next_off_at, snapshot.nextChangeTimeLabel)
-                                    } else {
-                                        stringResource(R.string.next_on_at, snapshot.nextChangeTimeLabel)
+                                    text = when (snapshot.nextChangeTargetState) {
+                                        SlotState.ON -> stringResource(R.string.next_on_at, snapshot.nextChangeTimeLabel)
+                                        SlotState.MAYBE -> "Можливе вимкнення о ${snapshot.nextChangeTimeLabel}"
+                                        SlotState.OFF, null -> stringResource(R.string.next_off_at, snapshot.nextChangeTimeLabel)
                                     },
                                     style = MaterialTheme.typography.labelLarge,
                                     color = Color.White.copy(alpha = 0.92f)
@@ -507,6 +567,30 @@ private fun HeroStatusCard(snapshot: PowerStatusSnapshot) {
                                 )
                             }
 
+                            if (snapshot.todayMaybeMinutes > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(1.dp)
+                                        .height(28.dp)
+                                        .background(Color.White.copy(alpha = 0.22f))
+                                )
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        text = stringResource(R.string.daily_maybe_off),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.White.copy(alpha = 0.78f)
+                                    )
+                                    Text(
+                                        text = formatDurationUa(snapshot.todayMaybeMinutes),
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontFamily = JetBrainsMonoFontFamily,
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = Color.White
+                                    )
+                                }
+                            }
+
                             Box(
                                 modifier = Modifier
                                     .width(1.dp)
@@ -531,12 +615,71 @@ private fun HeroStatusCard(snapshot: PowerStatusSnapshot) {
                             }
                         }
                     }
+
+                    // Quick manual live input (whether light is actually on/off right now)
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = stringResource(R.string.manual_status_title),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White.copy(alpha = 0.85f)
+                        )
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            ManualStatusChip(
+                                label = stringResource(R.string.manual_btn_on),
+                                selected = snapshot.isManualOverride && snapshot.effectiveState == SlotState.ON,
+                                testTag = "manual_on_button",
+                                onClick = { onSetManualLiveStatus(SlotState.ON) }
+                            )
+                            ManualStatusChip(
+                                label = stringResource(R.string.manual_btn_off),
+                                selected = snapshot.isManualOverride && snapshot.effectiveState == SlotState.OFF,
+                                testTag = "manual_off_button",
+                                onClick = { onSetManualLiveStatus(SlotState.OFF) }
+                            )
+                            if (snapshot.isManualOverride) {
+                                ManualStatusChip(
+                                    label = stringResource(R.string.manual_btn_auto),
+                                    selected = false,
+                                    testTag = "manual_reset_button",
+                                    onClick = { onSetManualLiveStatus(null) }
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 }
 
+@Composable
+private fun ManualStatusChip(
+    label: String,
+    selected: Boolean,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        color = if (selected) Color.White else Color.White.copy(alpha = 0.18f),
+        shape = RoundedCornerShape(50),
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .testTag(testTag)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            color = if (selected) Color(0xFF0F172A) else Color.White,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DailyScheduleCard(
     daySchedule: DaySchedule?,
@@ -545,7 +688,9 @@ private fun DailyScheduleCard(
     todayDateLabel: String,
     tomorrowDateLabel: String,
     currentMinuteOfDay: Int,
-    onSelectDay: (Boolean) -> Unit
+    onSelectDay: (Boolean) -> Unit,
+    onHourClick: (Int) -> Unit,
+    onResetManualEdits: () -> Unit
 ) {
     Surface(
         modifier = Modifier
@@ -557,7 +702,7 @@ private fun DailyScheduleCard(
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -600,28 +745,55 @@ private fun DailyScheduleCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
-                // Continuous 24h timeline bar
                 Timeline24hBar(
                     slots = daySchedule.slots,
                     showNowMarker = !isViewingTomorrow,
                     currentMinuteOfDay = currentMinuteOfDay
                 )
 
-                // 24 hourly cells (6 rows x 4 columns)
-                HourlyMatrixGrid(
-                    slots = daySchedule.slots,
-                    currentHour = if (!isViewingTomorrow) (currentMinuteOfDay / 60).coerceIn(0, 23) else -1
-                )
-
-                // Compact legend
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = stringResource(R.string.tap_hour_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (daySchedule.hasManualEdits) {
+                        Text(
+                            text = stringResource(R.string.reset_manual_edits),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(onClick = onResetManualEdits)
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .testTag("reset_manual_day_button")
+                        )
+                    }
+                }
+
+                HourlyMatrixGrid(
+                    slots = daySchedule.slots,
+                    currentHour = if (!isViewingTomorrow) (currentMinuteOfDay / 60).coerceIn(0, 23) else -1,
+                    onHourClick = onHourClick
+                )
+
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     LegendDot(
                         color = PowerOnGreenBright,
                         label = stringResource(R.string.legend_on)
+                    )
+                    LegendDot(
+                        color = AmberWarning,
+                        label = stringResource(R.string.legend_maybe)
                     )
                     LegendDot(
                         color = PowerOffRedBright,
@@ -651,7 +823,7 @@ private fun DaySwitchPill(
         shape = RoundedCornerShape(50)
     ) {
         Row(modifier = Modifier.padding(3.dp)) {
-            listOf(false to todayLabel, true to tomorrowLabel).forEach { (isTom, label) ->
+            listOf(false to todayLabel, true to tomorrowLabel).forEach { (isTom, _) ->
                 val selected = isViewingTomorrow == isTom
                 Surface(
                     color = if (selected) MaterialTheme.colorScheme.surface else Color.Transparent,
@@ -711,8 +883,8 @@ private fun Timeline24hBar(
             for (i in 0 until 48) {
                 val color = when (slots.getOrElse(i) { SlotState.ON }) {
                     SlotState.ON -> PowerOnGreenBright
-                    SlotState.OFF -> PowerOffRedBright
                     SlotState.MAYBE -> AmberWarning
+                    SlotState.OFF -> PowerOffRedBright
                 }
                 val x = i * slotWidth
                 drawRect(
@@ -754,14 +926,24 @@ private fun Timeline24hBar(
 @Composable
 private fun HourlyMatrixGrid(
     slots: List<SlotState>,
-    currentHour: Int
+    currentHour: Int,
+    onHourClick: (Int) -> Unit
 ) {
     val isDark = isSystemInDarkTheme()
     val onBg = if (isDark) PowerOnGreenSoftDark else PowerOnGreenSoftLight
+    val maybeBg = if (isDark) PowerMaybeAmberSoftDark else AmberWarningSoft
     val offBg = if (isDark) PowerOffRedSoftDark else PowerOffRedSoftLight
+
     val onText = if (isDark) Color(0xFFDCFCE7) else Color(0xFF14532D)
+    val maybeText = if (isDark) Color(0xFFFEF3C7) else Color(0xFF78350F)
     val offText = if (isDark) Color(0xFFFEE2E2) else Color(0xFF7F1D1D)
     val currentBorderColor = MaterialTheme.colorScheme.onBackground
+
+    fun bgFor(state: SlotState) = when (state) {
+        SlotState.ON -> onBg
+        SlotState.MAYBE -> maybeBg
+        SlotState.OFF -> offBg
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         for (rowIdx in 0 until 6) {
@@ -775,18 +957,23 @@ private fun HourlyMatrixGrid(
                     val secondHalf = slots.getOrElse(hour * 2 + 1) { SlotState.ON }
                     val isCurrent = hour == currentHour
 
-                    val bothSame = firstHalf.isPowerAvailable == secondHalf.isPowerAvailable
-                    val labelColor = when {
-                        !firstHalf.isPowerAvailable && !secondHalf.isPowerAvailable -> offText
-                        firstHalf.isPowerAvailable && secondHalf.isPowerAvailable -> onText
-                        else -> MaterialTheme.colorScheme.onSurface
+                    val bothSame = firstHalf == secondHalf
+                    val labelColor = if (bothSame) {
+                        when (firstHalf) {
+                            SlotState.ON -> onText
+                            SlotState.MAYBE -> maybeText
+                            SlotState.OFF -> offText
+                        }
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
                     }
 
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .height(34.dp)
+                            .height(38.dp)
                             .clip(RoundedCornerShape(10.dp))
+                            .clickable { onHourClick(hour) }
                             .then(
                                 if (isCurrent) {
                                     Modifier.border(
@@ -797,7 +984,8 @@ private fun HourlyMatrixGrid(
                                 } else {
                                     Modifier
                                 }
-                            ),
+                            )
+                            .testTag("hour_cell_$hour"),
                         contentAlignment = Alignment.Center
                     ) {
                         Row(modifier = Modifier.fillMaxSize()) {
@@ -805,13 +993,13 @@ private fun HourlyMatrixGrid(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxSize()
-                                    .background(if (firstHalf.isPowerAvailable) onBg else offBg)
+                                    .background(bgFor(firstHalf))
                             )
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxSize()
-                                    .background(if (secondHalf.isPowerAvailable) onBg else offBg)
+                                    .background(bgFor(secondHalf))
                             )
                         }
 
@@ -821,7 +1009,7 @@ private fun HourlyMatrixGrid(
                                 fontFamily = JetBrainsMonoFontFamily,
                                 fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium
                             ),
-                            color = if (bothSame) labelColor else MaterialTheme.colorScheme.onSurface
+                            color = labelColor
                         )
                     }
                 }
@@ -855,6 +1043,7 @@ private fun TextIntervalsCard(
     isViewingTomorrow: Boolean,
     hasDayData: Boolean,
     onRanges: List<TimeRange>,
+    maybeRanges: List<TimeRange>,
     offRanges: List<TimeRange>
 ) {
     Surface(
@@ -885,6 +1074,21 @@ private fun TextIntervalsCard(
                 },
                 testTag = "power_on_intervals_text"
             )
+
+            if (hasDayData && maybeRanges.isNotEmpty()) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+
+                IntervalSection(
+                    dotColor = AmberWarning,
+                    title = if (isViewingTomorrow) {
+                        stringResource(R.string.text_power_maybe_tomorrow)
+                    } else {
+                        stringResource(R.string.text_power_maybe_today)
+                    },
+                    rangesText = maybeRanges.joinToString(", ") { it.format() },
+                    testTag = "power_maybe_intervals_text"
+                )
+            }
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outline)
 
@@ -1007,6 +1211,103 @@ private fun SourceFooter(
                 contentDescription = stringResource(R.string.source_label),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(12.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun EditHourDialog(
+    hour: Int,
+    hasManualOverride: Boolean,
+    onDismiss: () -> Unit,
+    onSelectState: (SlotState?) -> Unit
+) {
+    val rangeTitle = String.format("%02d:00 – %02d:00", hour, hour + 1)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = stringResource(R.string.edit_hour_title, rangeTitle),
+                style = MaterialTheme.typography.titleLarge
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                HourStateOptionButton(
+                    color = PowerOnGreenBright,
+                    label = stringResource(R.string.option_power_on),
+                    testTag = "edit_hour_on",
+                    onClick = { onSelectState(SlotState.ON) }
+                )
+                HourStateOptionButton(
+                    color = AmberWarning,
+                    label = stringResource(R.string.option_possible_outage),
+                    testTag = "edit_hour_maybe",
+                    onClick = { onSelectState(SlotState.MAYBE) }
+                )
+                HourStateOptionButton(
+                    color = PowerOffRedBright,
+                    label = stringResource(R.string.option_power_off),
+                    testTag = "edit_hour_off",
+                    onClick = { onSelectState(SlotState.OFF) }
+                )
+                if (hasManualOverride) {
+                    OutlinedButton(
+                        onClick = { onSelectState(null) },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("edit_hour_reset")
+                    ) {
+                        Text(stringResource(R.string.option_reset_hour))
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Закрити")
+            }
+        }
+    )
+}
+
+@Composable
+private fun HourStateOptionButton(
+    color: Color,
+    label: String,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(50.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .testTag(testTag)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(14.dp)
+                    .clip(CircleShape)
+                    .background(color)
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
             )
         }
     }
@@ -1137,7 +1438,6 @@ private fun QueueSelectorBottomSheet(
                 color = MaterialTheme.colorScheme.onSurface
             )
 
-            // 4-column grid of queues (1.1 - 6.2)
             val rows = availableQueues.chunked(4)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 rows.forEach { rowQueues ->

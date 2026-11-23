@@ -2,6 +2,7 @@ package com.example.data
 
 import com.example.model.DaySchedule
 import com.example.model.KyivDate
+import com.example.model.ManualStatusOverride
 import com.example.model.OutageTransition
 import com.example.model.PowerStatusSnapshot
 import com.example.model.ScheduleDataset
@@ -121,7 +122,6 @@ object PowerScheduleParser {
     private fun formatLastUpdated(raw: String, fallbackMillis: Long): String {
         val trimmed = raw.trim()
         if (trimmed.isEmpty()) return KyivTime.formatUpdatedLabel(fallbackMillis)
-        // Example ISO: 2026-11-23T12:15:00.000Z or 23.11.2026 12:15
         if (trimmed.length >= 16 && trimmed[4] == '-' && trimmed[10] == 'T') {
             val datePart = trimmed.substring(8, 10) + "." + trimmed.substring(5, 7)
             val timePart = trimmed.substring(11, 16)
@@ -130,28 +130,60 @@ object PowerScheduleParser {
         return trimmed
     }
 
-    fun computeTimeRanges(slots: List<SlotState>, wantOn: Boolean): List<TimeRange> {
+    fun computeTimeRanges(slots: List<SlotState>, targetState: SlotState): List<TimeRange> {
         if (slots.size != 48) return emptyList()
         val ranges = mutableListOf<TimeRange>()
         var activeStartMinute: Int? = null
         for (i in slots.indices) {
-            val matches = slots[i].isPowerAvailable == wantOn
+            val matches = slots[i] == targetState
             if (matches && activeStartMinute == null) {
                 activeStartMinute = i * 30
             } else if (!matches && activeStartMinute != null) {
-                ranges.add(TimeRange(activeStartMinute, i * 30, wantOn))
+                ranges.add(TimeRange(activeStartMinute, i * 30, targetState))
                 activeStartMinute = null
             }
         }
         if (activeStartMinute != null) {
-            ranges.add(TimeRange(activeStartMinute, 1440, wantOn))
+            ranges.add(TimeRange(activeStartMinute, 1440, targetState))
         }
         return ranges
     }
 
-    fun computeSnapshot(
+    // Convenience overload kept compatible for simple ON/non-ON queries
+    fun computeTimeRanges(slots: List<SlotState>, wantOn: Boolean): List<TimeRange> =
+        computeTimeRanges(slots, if (wantOn) SlotState.ON else SlotState.OFF)
+
+    fun computeCurrentBlockEndMillis(
         dataset: ScheduleDataset,
         nowMillis: Long = System.currentTimeMillis()
+    ): Long {
+        val todayDate = KyivTime.todayDate(nowMillis)
+        val tomorrowDate = KyivTime.nextDay(todayDate)
+        val todaySchedule = dataset.days[todayDate]
+            ?: return KyivTime.epochMillisFor(todayDate, 1440)
+        val tomorrowSchedule = dataset.days[tomorrowDate]
+
+        val currentMinute = KyivTime.currentMinuteOfDay(nowMillis)
+        val currentSlotIdx = (currentMinute / 30).coerceIn(0, 47)
+        val currentState = todaySchedule.slots[currentSlotIdx]
+
+        val timelineSlots = buildList {
+            addAll(todaySchedule.slots)
+            if (tomorrowSchedule != null) addAll(tomorrowSchedule.slots)
+        }
+
+        for (idx in (currentSlotIdx + 1) until timelineSlots.size) {
+            if (timelineSlots[idx] != currentState) {
+                return KyivTime.epochMillisFor(todayDate, idx * 30)
+            }
+        }
+        return KyivTime.epochMillisFor(todayDate, timelineSlots.size * 30)
+    }
+
+    fun computeSnapshot(
+        dataset: ScheduleDataset,
+        nowMillis: Long = System.currentTimeMillis(),
+        manualOverride: ManualStatusOverride? = null
     ): PowerStatusSnapshot {
         val todayDate = KyivTime.todayDate(nowMillis)
         val tomorrowDate = KyivTime.nextDay(todayDate)
@@ -161,61 +193,80 @@ object PowerScheduleParser {
         val tomorrowSchedule = dataset.days[tomorrowDate]
         val yesterdaySchedule = dataset.days[yesterdayDate]
 
+        val activeOverride = manualOverride?.takeIf { it.expiresAtMillis > nowMillis }
+
         if (todaySchedule == null) {
             val currentMinute = KyivTime.currentMinuteOfDay(nowMillis)
-            val tomorrowOnRanges = tomorrowSchedule?.let { computeTimeRanges(it.slots, wantOn = true) } ?: emptyList()
-            val tomorrowOffRanges = tomorrowSchedule?.let { computeTimeRanges(it.slots, wantOn = false) } ?: emptyList()
+            val tomorrowOnRanges = tomorrowSchedule?.let { computeTimeRanges(it.slots, SlotState.ON) } ?: emptyList()
+            val tomorrowMaybeRanges = tomorrowSchedule?.let { computeTimeRanges(it.slots, SlotState.MAYBE) } ?: emptyList()
+            val tomorrowOffRanges = tomorrowSchedule?.let { computeTimeRanges(it.slots, SlotState.OFF) } ?: emptyList()
             return PowerStatusSnapshot(
                 todaySchedule = null,
                 tomorrowSchedule = tomorrowSchedule,
-                isPowerOn = true,
-                currentSlotState = SlotState.ON,
-                remainingSeconds = -1L,
+                effectiveState = activeOverride?.state ?: SlotState.ON,
+                scheduleState = SlotState.ON,
+                isManualOverride = activeOverride != null,
+                remainingSeconds = activeOverride?.let { ((it.expiresAtMillis - nowMillis) / 1000L).coerceAtLeast(0L) } ?: -1L,
                 blockProgress = 0f,
-                nextChangeTimeLabel = null,
+                nextChangeTimeLabel = activeOverride?.let { KyivTime.formatHHmm(it.expiresAtMillis) },
+                nextChangeTargetState = null,
                 todayOnMinutes = 1440,
+                todayMaybeMinutes = 0,
                 todayOffMinutes = 0,
                 todayOnRanges = emptyList(),
+                todayMaybeRanges = emptyList(),
                 todayOffRanges = emptyList(),
                 tomorrowOnRanges = tomorrowOnRanges,
+                tomorrowMaybeRanges = tomorrowMaybeRanges,
                 tomorrowOffRanges = tomorrowOffRanges,
                 currentMinuteOfDay = currentMinute
             )
         }
 
         val currentMinute = KyivTime.currentMinuteOfDay(nowMillis)
-        val currentSecond = KyivTime.currentSecondInMinute(nowMillis)
         val currentSlotIdx = (currentMinute / 30).coerceIn(0, 47)
-        val currentSlotState = todaySchedule.slots[currentSlotIdx]
-        val isPowerOn = currentSlotState.isPowerAvailable
+        val scheduleState = todaySchedule.slots[currentSlotIdx]
 
-        // Build continuous timeline across today + tomorrow (96 slots if tomorrow exists, else 48)
-        val timelineSlots = buildList {
+        // Build effective timeline (applying active manual override up to its expiration slot)
+        val rawTimeline = buildList {
             addAll(todaySchedule.slots)
             if (tomorrowSchedule != null) {
                 addAll(tomorrowSchedule.slots)
             }
         }
+        val effectiveTimeline = rawTimeline.toMutableList()
+        if (activeOverride != null) {
+            val todayMidnightMillis = KyivTime.epochMillisFor(todayDate, 0)
+            val overrideEndSlotExclusive =
+                (((activeOverride.expiresAtMillis - todayMidnightMillis) + 1799_999L) / 1800_000L)
+                    .toInt()
+                    .coerceIn(currentSlotIdx + 1, effectiveTimeline.size)
+            for (idx in currentSlotIdx until overrideEndSlotExclusive) {
+                effectiveTimeline[idx] = activeOverride.state
+            }
+        }
 
-        // Find end of current state in timeline
+        val effectiveState = effectiveTimeline[currentSlotIdx]
+
+        // Find next state change in effective timeline
         var nextChangeSlotIdx: Int? = null
-        for (idx in (currentSlotIdx + 1) until timelineSlots.size) {
-            if (timelineSlots[idx].isPowerAvailable != isPowerOn) {
+        for (idx in (currentSlotIdx + 1) until effectiveTimeline.size) {
+            if (effectiveTimeline[idx] != effectiveState) {
                 nextChangeSlotIdx = idx
                 break
             }
         }
 
-        // Find start of current block (looking backward into today and yesterday)
+        // Find start of current block
         var blockStartSlotOffset = currentSlotIdx
         var i = currentSlotIdx - 1
-        while (i >= 0 && todaySchedule.slots[i].isPowerAvailable == isPowerOn) {
+        while (i >= 0 && effectiveTimeline[i] == effectiveState) {
             blockStartSlotOffset = i
             i--
         }
-        if (i < 0 && yesterdaySchedule != null) {
+        if (i < 0 && yesterdaySchedule != null && activeOverride == null) {
             var yIdx = 47
-            while (yIdx >= 0 && yesterdaySchedule.slots[yIdx].isPowerAvailable == isPowerOn) {
+            while (yIdx >= 0 && yesterdaySchedule.slots[yIdx] == effectiveState) {
                 blockStartSlotOffset = yIdx - 48
                 yIdx--
             }
@@ -223,12 +274,14 @@ object PowerScheduleParser {
 
         val remainingSeconds: Long
         val nextChangeTimeLabel: String?
+        val nextChangeTargetState: SlotState?
         val blockProgress: Float
 
         if (nextChangeSlotIdx != null) {
             val changeTotalMinutesFromTodayMidnight = nextChangeSlotIdx * 30
             val changeMillis = KyivTime.epochMillisFor(todayDate, changeTotalMinutesFromTodayMidnight)
             remainingSeconds = ((changeMillis - nowMillis) / 1000L).coerceAtLeast(0L)
+            nextChangeTargetState = effectiveTimeline[nextChangeSlotIdx]
 
             val minuteInTargetDay = changeTotalMinutesFromTodayMidnight % 1440
             val timeStr = TimeRange.formatMinutes(minuteInTargetDay)
@@ -243,19 +296,18 @@ object PowerScheduleParser {
             val elapsedMillis = (nowMillis - blockStartMillis).coerceIn(0L, totalBlockMillis)
             blockProgress = (elapsedMillis.toFloat() / totalBlockMillis.toFloat()).coerceIn(0f, 1f)
         } else {
-            // No change known in available today/tomorrow window
-            remainingSeconds = if (todaySchedule.hasAnyOutage || tomorrowSchedule != null) {
-                // Remaining until end of known window if there was an outage earlier today or tomorrow is known
-                val endMinutes = timelineSlots.size * 30
+            remainingSeconds = if (todaySchedule.hasAnyInterruption || tomorrowSchedule != null) {
+                val endMinutes = effectiveTimeline.size * 30
                 val endMillis = KyivTime.epochMillisFor(todayDate, endMinutes)
                 ((endMillis - nowMillis) / 1000L).coerceAtLeast(0L)
             } else {
                 -1L
             }
             nextChangeTimeLabel = null
+            nextChangeTargetState = null
             blockProgress = if (remainingSeconds > 0L) {
                 val blockStartMillis = KyivTime.epochMillisFor(todayDate, blockStartSlotOffset * 30)
-                val endMillis = KyivTime.epochMillisFor(todayDate, timelineSlots.size * 30)
+                val endMillis = KyivTime.epochMillisFor(todayDate, effectiveTimeline.size * 30)
                 val total = (endMillis - blockStartMillis).coerceAtLeast(1L)
                 ((nowMillis - blockStartMillis).toFloat() / total.toFloat()).coerceIn(0f, 1f)
             } else {
@@ -263,26 +315,33 @@ object PowerScheduleParser {
             }
         }
 
-        val todayOnRanges = computeTimeRanges(todaySchedule.slots, wantOn = true)
-        val todayOffRanges = computeTimeRanges(todaySchedule.slots, wantOn = false)
-        val tomorrowOnRanges = tomorrowSchedule?.let { computeTimeRanges(it.slots, wantOn = true) } ?: emptyList()
-        val tomorrowOffRanges = tomorrowSchedule?.let { computeTimeRanges(it.slots, wantOn = false) } ?: emptyList()
+        val todayOnRanges = computeTimeRanges(todaySchedule.slots, SlotState.ON)
+        val todayMaybeRanges = computeTimeRanges(todaySchedule.slots, SlotState.MAYBE)
+        val todayOffRanges = computeTimeRanges(todaySchedule.slots, SlotState.OFF)
+        val tomorrowOnRanges = tomorrowSchedule?.let { computeTimeRanges(it.slots, SlotState.ON) } ?: emptyList()
+        val tomorrowMaybeRanges = tomorrowSchedule?.let { computeTimeRanges(it.slots, SlotState.MAYBE) } ?: emptyList()
+        val tomorrowOffRanges = tomorrowSchedule?.let { computeTimeRanges(it.slots, SlotState.OFF) } ?: emptyList()
 
         return PowerStatusSnapshot(
             todaySchedule = todaySchedule,
             tomorrowSchedule = tomorrowSchedule,
-            isPowerOn = isPowerOn,
-            currentSlotState = currentSlotState,
+            effectiveState = effectiveState,
+            scheduleState = scheduleState,
+            isManualOverride = activeOverride != null,
             remainingSeconds = remainingSeconds,
             blockProgress = blockProgress,
             nextChangeTimeLabel = nextChangeTimeLabel,
+            nextChangeTargetState = nextChangeTargetState,
             todayOnMinutes = todaySchedule.totalOnMinutes,
+            todayMaybeMinutes = todaySchedule.totalMaybeMinutes,
             todayOffMinutes = todaySchedule.totalOffMinutes,
             todayOnRanges = todayOnRanges,
+            todayMaybeRanges = todayMaybeRanges,
             todayOffRanges = todayOffRanges,
             tomorrowOnRanges = tomorrowOnRanges,
+            tomorrowMaybeRanges = tomorrowMaybeRanges,
             tomorrowOffRanges = tomorrowOffRanges,
-            currentMinuteOfDay = currentMinute + if (currentSecond >= 30) 0 else 0
+            currentMinuteOfDay = currentMinute
         )
     }
 
@@ -303,16 +362,15 @@ object PowerScheduleParser {
         val currentSlotIdx = (KyivTime.currentMinuteOfDay(nowMillis) / 30).coerceIn(0, 47)
         val transitions = mutableListOf<OutageTransition>()
 
-        var idx = (currentSlotIdx).coerceAtLeast(1)
+        var idx = currentSlotIdx.coerceAtLeast(1)
         while (idx < timeline.size) {
-            val prevOn = timeline[idx - 1].isPowerAvailable
-            val currOff = !timeline[idx].isPowerAvailable
-            if (prevOn && currOff) {
+            val prevOn = timeline[idx - 1] == SlotState.ON
+            val currState = timeline[idx]
+            if (prevOn && currState != SlotState.ON) {
                 val startMillis = KyivTime.epochMillisFor(todayDate, idx * 30)
                 if (startMillis > nowMillis) {
-                    // Find when power turns back on
                     var endIdx = idx + 1
-                    while (endIdx < timeline.size && !timeline[endIdx].isPowerAvailable) {
+                    while (endIdx < timeline.size && timeline[endIdx] != SlotState.ON) {
                         endIdx++
                     }
                     val endMillis = if (endIdx < timeline.size) {
@@ -324,7 +382,8 @@ object PowerScheduleParser {
                             outageStartMillis = startMillis,
                             outageEndMillis = endMillis,
                             offTimeFormatted = TimeRange.formatMinutes((idx * 30) % 1440),
-                            backOnTimeFormatted = endMillis?.let { KyivTime.formatHHmm(it) }
+                            backOnTimeFormatted = endMillis?.let { KyivTime.formatHHmm(it) },
+                            isMaybe = currState == SlotState.MAYBE
                         )
                     )
                 }

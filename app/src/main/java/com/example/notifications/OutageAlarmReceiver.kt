@@ -15,6 +15,7 @@ class OutageAlarmReceiver : BroadcastReceiver() {
         val outageStartMillis = intent.getLongExtra(EXTRA_OUTAGE_START_MILLIS, 0L)
         val queueId = intent.getStringExtra(EXTRA_QUEUE_ID) ?: prefs.selectedQueue
         val addressLabel = intent.getStringExtra(EXTRA_ADDRESS_LABEL) ?: prefs.addressLabel
+        val isMaybe = intent.getBooleanExtra(EXTRA_IS_MAYBE, false)
 
         if (outageStartMillis > 0L && prefs.lastNotifiedOutageStartMillis == outageStartMillis) {
             return
@@ -29,7 +30,8 @@ class OutageAlarmReceiver : BroadcastReceiver() {
             backOnTime = backOnTime,
             outageStartMillis = outageStartMillis,
             queueId = queueId,
-            addressLabel = addressLabel
+            addressLabel = addressLabel,
+            isMaybe = isMaybe
         )
     }
 
@@ -39,5 +41,6 @@ class OutageAlarmReceiver : BroadcastReceiver() {
         const val EXTRA_OUTAGE_START_MILLIS = "extra_outage_start_millis"
         const val EXTRA_QUEUE_ID = "extra_queue_id"
         const val EXTRA_ADDRESS_LABEL = "extra_address_label"
+        const val EXTRA_IS_MAYBE = "extra_is_maybe"
     }
 }

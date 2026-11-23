@@ -1,10 +1,16 @@
 package com.example
 
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
 import com.example.data.KyivTime
 import com.example.data.PowerScheduleParser
+import com.example.data.SchedulePreferences
 import com.example.model.KyivDate
+import com.example.model.ManualStatusOverride
+import com.example.model.SlotState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -91,6 +97,106 @@ class PowerScheduleParserTest {
         assertEquals(1, transitions.size)
         assertEquals("02:30", transitions[0].offTimeFormatted)
         assertEquals("04:30", transitions[0].backOnTimeFormatted)
+        assertFalse(transitions[0].isMaybe)
+    }
+
+    @Test
+    fun `parses MAYBE periods accurately and computes transitions`() {
+        val date = KyivDate(2026, 11, 23)
+        val midnightEpochSec = KyivTime.epochMillisFor(date, 0) / 1000L
+
+        val json = """
+            {
+              "fact": {
+                "data": {
+                  "$midnightEpochSec": {
+                    "GPV3.1": {
+                      "1": "yes",
+                      "2": "msecond",
+                      "3": "maybe",
+                      "4": "mfirst",
+                      "5": "yes"
+                    }
+                  }
+                }
+              }
+            }
+        """.trimIndent()
+
+        val dataset = PowerScheduleParser.parseJson(json)
+        val day = dataset.days[date]!!
+        val maybeRanges = PowerScheduleParser.computeTimeRanges(day.slots, SlotState.MAYBE)
+
+        assertEquals(listOf("01:30 – 03:30"), maybeRanges.map { it.format() })
+        assertEquals(120, day.totalMaybeMinutes)
+
+        val at0200 = KyivTime.epochMillisFor(date, 2 * 60)
+        val snap = PowerScheduleParser.computeSnapshot(dataset, at0200)
+        assertEquals(SlotState.MAYBE, snap.effectiveState)
+        assertEquals(5400L, snap.remainingSeconds) // until 03:30
+        assertEquals("03:30", snap.nextChangeTimeLabel)
+        assertEquals(SlotState.ON, snap.nextChangeTargetState)
+
+        val at0100 = KyivTime.epochMillisFor(date, 60)
+        val transitions = PowerScheduleParser.computeUpcomingOutageTransitions(dataset, at0100)
+        assertEquals(1, transitions.size)
+        assertTrue(transitions[0].isMaybe)
+        assertEquals("01:30", transitions[0].offTimeFormatted)
+        assertEquals("03:30", transitions[0].backOnTimeFormatted)
+    }
+
+    @Test
+    fun `applies manual live override and per-hour schedule overrides`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = SchedulePreferences(context)
+        val date = KyivDate(2026, 11, 23)
+        val midnightEpochSec = KyivTime.epochMillisFor(date, 0) / 1000L
+
+        prefs.clearDaySlotOverrides("3.1", date)
+        prefs.setManualStatusOverride(null, 0L)
+
+        val json = """
+            {
+              "fact": {
+                "data": {
+                  "$midnightEpochSec": {
+                    "GPV3.1": {
+                      "10": "no",
+                      "11": "yes"
+                    }
+                  }
+                }
+              }
+            }
+        """.trimIndent()
+
+        val parsed = PowerScheduleParser.parseJson(json, queueId = "3.1")
+        // Hour 11 in 1-based TOE JSON = 10:00-11:00 (0-based hour 10)
+        prefs.setHourOverride("3.1", date, hour = 10, state = SlotState.MAYBE)
+        val merged = prefs.applyManualSlotOverrides(parsed)
+        val mergedDay = merged.days[date]!!
+        assertTrue(mergedDay.hasManualEdits)
+        assertEquals(SlotState.MAYBE, mergedDay.slots[20])
+        assertEquals(SlotState.MAYBE, mergedDay.slots[21])
+        assertEquals(SlotState.MAYBE, prefs.getHourOverride("3.1", date, 10))
+
+        // At 09:30 (scheduled OFF because TOE hour 10 is 09:00-10:00), user overrides live status to ON until 10:00
+        val at0930 = KyivTime.epochMillisFor(date, 9 * 60 + 30)
+        val at1000 = KyivTime.epochMillisFor(date, 10 * 60)
+        val snapManual = PowerScheduleParser.computeSnapshot(
+            dataset = merged,
+            nowMillis = at0930,
+            manualOverride = ManualStatusOverride(SlotState.ON, at1000)
+        )
+        assertTrue(snapManual.isManualOverride)
+        assertEquals(SlotState.ON, snapManual.effectiveState)
+        assertEquals(SlotState.OFF, snapManual.scheduleState)
+        assertEquals(1800L, snapManual.remainingSeconds)
+        assertEquals(SlotState.MAYBE, snapManual.nextChangeTargetState)
+
+        // Reset day overrides
+        prefs.clearDaySlotOverrides("3.1", date)
+        assertNull(prefs.getHourOverride("3.1", date, 10))
     }
 
     @Test

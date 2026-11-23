@@ -51,7 +51,8 @@ object OutageNotificationHelper {
         backOnTime: String?,
         outageStartMillis: Long,
         queueId: String = "3.1",
-        addressLabel: String = ""
+        addressLabel: String = "",
+        isMaybe: Boolean = false
     ) {
         if (!hasNotificationPermission(context)) return
         ensureChannel(context)
@@ -67,15 +68,29 @@ object OutageNotificationHelper {
         )
 
         val addressSuffix = if (addressLabel.isNotBlank()) " ($addressLabel)" else ""
-        val body = if (backOnTime != null) {
-            "О $offTime світло вимкнуть до $backOnTime$addressSuffix."
+        val body = if (isMaybe) {
+            if (backOnTime != null) {
+                "З $offTime до $backOnTime можливе відключення$addressSuffix."
+            } else {
+                "О $offTime починається період можливих відключень$addressSuffix."
+            }
         } else {
-            "О $offTime заплановано вимкнення електроенергії$addressSuffix."
+            if (backOnTime != null) {
+                "О $offTime світло вимкнуть до $backOnTime$addressSuffix."
+            } else {
+                "О $offTime заплановано вимкнення електроенергії$addressSuffix."
+            }
+        }
+
+        val title = if (isMaybe) {
+            "За 15 хв можливе відключення · Черга $queueId"
+        } else {
+            "За 15 хв вимкнення світла · Черга $queueId"
         }
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("За 15 хв вимкнення світла · Черга $queueId")
+            .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
