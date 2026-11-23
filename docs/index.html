@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#15803D" id="meta-theme-color" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Світло 3.1" />
+  <title>Світло 3.1</title>
+
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png" />
+  <link rel="apple-touch-icon" href="./icon-192.png" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Top Header -->
+    <header class="header-bar">
+      <button type="button" class="queue-trigger" id="btn-open-queue" aria-label="Обрати чергу">
+        <span class="queue-title-row">
+          <span id="queue-title-text">Черга 3.1</span>
+          <svg class="icon-20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </span>
+        <span class="address-subtitle" id="address-label-text">с. Городище, вул. Польова</span>
+      </button>
+
+      <div class="header-actions">
+        <button type="button" class="icon-btn" id="btn-install-pwa" hidden title="Встановити на головний екран" aria-label="Встановити додаток">
+          <svg class="icon-22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <path d="M5 21h14"></path>
+          </svg>
+        </button>
+
+        <button type="button" class="icon-btn" id="btn-refresh" aria-label="Оновити графік" title="Оновити графік">
+          <svg class="icon-22" id="refresh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <polyline points="1 20 1 14 7 14"></polyline>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Install prompt banner (shown when browser supports 1-tap PWA install) -->
+    <section class="install-banner" id="install-banner" hidden>
+      <div class="install-banner-text">
+        <strong>Додати на екран телефону</strong>
+        <span>Відкриватиметься як звичайний додаток і працюватиме без інтернету</span>
+      </div>
+      <button type="button" class="btn-primary btn-sm" id="btn-install-banner">Встановити</button>
+    </section>
+
+    <!-- Main Status Container -->
+    <main id="main-content">
+      <!-- Loading state -->
+      <section class="card state-card" id="loading-card">
+        <div class="spinner" aria-hidden="true"></div>
+        <p class="muted">Завантаження графіку…</p>
+      </section>
+
+      <!-- Error state -->
+      <section class="card state-card" id="error-card" hidden>
+        <p class="error-title">Не вдалося завантажити графік</p>
+        <p class="muted" id="error-message"></p>
+        <button type="button" class="btn-primary" id="btn-retry">Повторити</button>
+      </section>
+
+      <!-- Active content -->
+      <div id="schedule-content" hidden>
+        <!-- Hero Status Card -->
+        <section class="hero-card state-on" id="hero-card">
+          <div class="hero-top-row">
+            <span class="status-pill">
+              <span class="pill-dot"></span>
+              <span id="hero-badge-text">Зараз</span>
+            </span>
+            <span class="hero-icon" id="hero-icon" aria-hidden="true">⚡</span>
+          </div>
+
+          <h1 class="hero-headline" id="hero-headline">Є СВІТЛО</h1>
+
+          <div id="hero-body-waiting" hidden>
+            <p class="hero-waiting-text">Дані графіка на сьогодні ще оновлюються на сайті</p>
+          </div>
+
+          <div id="hero-body-active">
+            <div id="countdown-block">
+              <p class="timer-prefix" id="timer-prefix">Світло ще буде:</p>
+              <div class="countdown-digits" id="countdown-digits">00:00:00</div>
+              <p class="next-change-label" id="next-change-label"></p>
+              <div class="progress-track">
+                <div class="progress-fill" id="progress-fill" style="width: 0%;"></div>
+              </div>
+            </div>
+
+            <p class="no-outages-text" id="no-outages-text" hidden>
+              Сьогодні відключень не заплановано
+            </p>
+
+            <!-- Daily totals pill -->
+            <div class="totals-pill">
+              <div class="total-col">
+                <span class="total-label">Зі світлом</span>
+                <span class="total-value" id="total-on-value">24 год</span>
+              </div>
+              <div class="total-divider" id="total-maybe-divider" hidden></div>
+              <div class="total-col total-col-center" id="total-maybe-col" hidden>
+                <span class="total-label">Можливі</span>
+                <span class="total-value" id="total-maybe-value">0 хв</span>
+              </div>
+              <div class="total-divider"></div>
+              <div class="total-col total-col-end">
+                <span class="total-label">Без світла</span>
+                <span class="total-value" id="total-off-value">0 хв</span>
+              </div>
+            </div>
+
+            <!-- Quick manual live status toggle -->
+            <div class="manual-live-block">
+              <span class="manual-live-title">Зараз насправді:</span>
+              <div class="manual-chips">
+                <button type="button" class="manual-chip" id="btn-manual-on">Є світло</button>
+                <button type="button" class="manual-chip" id="btn-manual-off">Нема світла</button>
+                <button type="button" class="manual-chip" id="btn-manual-auto" hidden>За графіком</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 24h Schedule Card -->
+        <section class="card schedule-card">
+          <div class="card-header-row">
+            <h2 class="card-title">Графік відключень на добу</h2>
+
+            <div class="day-switch-pill" id="day-switch-pill" hidden>
+              <button type="button" class="day-tab active" id="tab-today">Сьогодні</button>
+              <button type="button" class="day-tab" id="tab-tomorrow">Завтра</button>
+            </div>
+
+            <span class="date-badge" id="single-date-badge"></span>
+          </div>
+
+          <div id="day-missing-msg" class="muted" hidden>
+            Графік для цієї дати ще не опубліковано.
+          </div>
+
+          <div id="day-schedule-body">
+            <!-- 24h Bar -->
+            <div class="timeline-wrapper">
+              <div class="timeline-bar" id="timeline-bar">
+                <div class="timeline-slots" id="timeline-slots"></div>
+                <div class="now-marker" id="now-marker"></div>
+              </div>
+              <div class="timeline-labels">
+                <span>00</span><span>03</span><span>06</span><span>09</span><span>12</span><span>15</span><span>18</span><span>21</span><span>24</span>
+              </div>
+            </div>
+
+            <!-- Hint + Reset -->
+            <div class="hint-row">
+              <span class="hint-text">Натисніть на годину, щоб змінити стан вручну</span>
+              <button type="button" class="reset-link" id="btn-reset-day" hidden>Скинути</button>
+            </div>
+
+            <!-- 24-Hour Grid -->
+            <div class="hour-grid" id="hour-grid"></div>
+
+            <!-- Legend -->
+            <div class="legend-row">
+              <span class="legend-item"><i class="dot dot-on"></i>Є світло</span>
+              <span class="legend-item"><i class="dot dot-maybe"></i>Можливе</span>
+              <span class="legend-item"><i class="dot dot-off"></i>Нема світла</span>
+              <span class="legend-item" id="legend-now-item"><i class="dot dot-now"></i>Зараз</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Text Intervals Card -->
+        <section class="card intervals-card">
+          <div class="interval-section">
+            <div class="interval-title-row">
+              <i class="dot dot-on"></i>
+              <h3 id="title-on-intervals">Електроенергія сьогодні буде:</h3>
+            </div>
+            <p class="interval-values" id="text-on-intervals">—</p>
+          </div>
+
+          <div id="section-maybe-intervals" hidden>
+            <hr class="divider" />
+            <div class="interval-section">
+              <div class="interval-title-row">
+                <i class="dot dot-maybe"></i>
+                <h3 id="title-maybe-intervals">Можливі відключення сьогодні:</h3>
+              </div>
+              <p class="interval-values" id="text-maybe-intervals">—</p>
+            </div>
+          </div>
+
+          <hr class="divider" />
+
+          <div class="interval-section">
+            <div class="interval-title-row">
+              <i class="dot dot-off"></i>
+              <h3 id="title-off-intervals">Електроенергії не буде:</h3>
+            </div>
+            <p class="interval-values" id="text-off-intervals">—</p>
+          </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="source-footer">
+          <span class="footer-updated" id="footer-updated"></span>
+          <a href="https://poweron.toe.com.ua/" target="_blank" rel="noopener noreferrer" class="footer-link">
+            Дані: poweron.toe.com.ua ↗
+          </a>
+        </footer>
+      </div>
+    </main>
+  </div>
+
+  <!-- Queue & Address Modal Sheet -->
+  <div class="modal-backdrop" id="queue-modal" hidden>
+    <div class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="queue-modal-title">
+      <div class="modal-handle"></div>
+      <h2 class="modal-title" id="queue-modal-title">Оберіть чергу</h2>
+
+      <div class="queue-grid" id="queue-options-grid"></div>
+
+      <label class="input-group">
+        <span class="input-label">Адреса або підпис (необов’язково)</span>
+        <input type="text" id="input-address" class="text-input" placeholder="с. Городище, вул. Польова" />
+      </label>
+
+      <a href="https://poweron.toe.com.ua/" target="_blank" rel="noopener noreferrer" class="portal-helper-link">
+        Дізнатися свою чергу за вулицею на poweron.toe.com.ua ↗
+      </a>
+
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="btn-cancel-queue">Скасувати</button>
+        <button type="button" class="btn-primary" id="btn-save-queue">Застосувати</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Hour Modal -->
+  <div class="modal-backdrop" id="hour-modal" hidden>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="hour-modal-title">
+      <h2 class="modal-title" id="hour-modal-title">Година 00:00 – 01:00</h2>
+
+      <div class="hour-options">
+        <button type="button" class="hour-option-btn" data-state="ON">
+          <i class="dot dot-on dot-lg"></i>
+          <span>Є світло</span>
+        </button>
+        <button type="button" class="hour-option-btn" data-state="MAYBE">
+          <i class="dot dot-maybe dot-lg"></i>
+          <span>Період можливих відключень</span>
+        </button>
+        <button type="button" class="hour-option-btn" data-state="OFF">
+          <i class="dot dot-off dot-lg"></i>
+          <span>Нема світла (відключення)</span>
+        </button>
+        <button type="button" class="btn-secondary full-width" id="btn-reset-hour" hidden>
+          Повернути за графіком
+        </button>
+      </div>
+
+      <div class="dialog-footer">
+        <button type="button" class="text-btn" id="btn-close-hour">Закрити</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>

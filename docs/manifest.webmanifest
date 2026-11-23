@@ -1,0 +1,26 @@
+{
+  "name": "Світло 3.1",
+  "short_name": "Світло 3.1",
+  "description": "Графік відключень електроенергії (черга 3.1, Тернопільщина) з живим таймером, періодами можливих відключень і ручним редагуванням.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#090D16",
+  "theme_color": "#15803D",
+  "lang": "uk",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
