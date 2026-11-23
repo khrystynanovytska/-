@@ -1,0 +1,6 @@
+{
+  "name": "Світло 3.1",
+  "description": "Графік відключень електроенергії для черги 3.1 (с. Городище, вул. Польова) з даними poweron.toe.com.ua, живим таймером та сповіщенням за 15 хв.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
