@@ -43,6 +43,21 @@ class SchedulePreferences(context: Context) {
         return json to fetchedAt
     }
 
+    fun saveCachedToeJson(queueId: String, json: String, fetchedAtMillis: Long) {
+        val q = queueId.trim()
+        prefs.edit()
+            .putString("cached_toe_json_$q", json)
+            .putLong("cached_toe_at_$q", fetchedAtMillis)
+            .apply()
+    }
+
+    fun getCachedToeJson(queueId: String): Pair<String, Long>? {
+        val q = queueId.trim()
+        val json = prefs.getString("cached_toe_json_$q", null) ?: return null
+        val fetchedAt = prefs.getLong("cached_toe_at_$q", 0L)
+        return json to fetchedAt
+    }
+
     var selectedQueue: String
         get() = prefs.getString(KEY_SELECTED_QUEUE, DEFAULT_QUEUE) ?: DEFAULT_QUEUE
         set(value) {

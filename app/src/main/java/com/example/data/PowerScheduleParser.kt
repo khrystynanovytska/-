@@ -28,6 +28,14 @@ object PowerScheduleParser {
         isFromCache: Boolean = false
     ): ScheduleDataset {
         val root = JSONObject(rawJson)
+        if (root.has("hydra:member") && root.optJSONArray("hydra:member") != null) {
+            return parseToeOfficialJson(
+                rawJson = rawJson,
+                queueId = queueId,
+                fetchedAtMillis = fetchedAtMillis,
+                isFromCache = isFromCache
+            )
+        }
         if (root.has("days") && root.optJSONArray("days") != null) {
             return parseSvitlobotJson(
                 rawJson = rawJson,
@@ -69,11 +77,39 @@ object PowerScheduleParser {
                 slots[firstSlotIdx] = s1
                 slots[secondSlotIdx] = s2
             }
-            days[date] = DaySchedule(date = date, slots = slots)
+            days[date] = DaySchedule(date = date, slots = fixOeBoundaryMismatches(slots))
         }
 
         if (days.isEmpty()) {
             throw IllegalArgumentException("Не знайдено даних для черги $queueId")
+        }
+
+        // Cross-midnight boundary check between adjacent parsed OE days
+        val sortedDates = days.keys.sorted()
+        for (idx in sortedDates.indices) {
+            val d = sortedDates[idx]
+            val day = days[d] ?: continue
+            val updated = day.slots.toMutableList()
+            var changed = false
+            val prevDate = KyivTime.previousDay(d)
+            val prevDay = days[prevDate]
+            if (prevDay != null && prevDay.slots.lastOrNull() == SlotState.OFF &&
+                updated[0] == SlotState.ON && updated[1] == SlotState.MAYBE
+            ) {
+                updated[0] = SlotState.OFF
+                changed = true
+            }
+            val nextDate = KyivTime.nextDay(d)
+            val nextDay = days[nextDate]
+            if (nextDay != null && nextDay.slots.firstOrNull() == SlotState.OFF &&
+                updated[46] == SlotState.MAYBE && updated[47] == SlotState.ON
+            ) {
+                updated[47] = SlotState.OFF
+                changed = true
+            }
+            if (changed) {
+                days[d] = day.copy(slots = updated)
+            }
         }
 
         val factUpdateRaw = fact.optString("update", "").trim()
@@ -120,6 +156,11 @@ object PowerScheduleParser {
         for (i in 0 until daysArray.length()) {
             val dayObj = daysArray.optJSONObject(i) ?: continue
             val date = parseIsoDate(dayObj.optString("date", "")) ?: continue
+            val rawSlots = dayObj.optJSONArray("slots")
+            val rawOutages = dayObj.optJSONArray("outages")
+            val hasSlots = rawSlots != null && rawSlots.length() > 0
+            val hasOutages = rawOutages != null
+            if (!hasSlots && !hasOutages) continue
             val slots = parseSvitlobotDaySlots(dayObj)
             days[date] = DaySchedule(date = date, slots = slots)
         }
@@ -143,6 +184,125 @@ object PowerScheduleParser {
             fetchedAtMillis = fetchedAtMillis,
             isFromCache = isFromCache,
             sourceUpdatedAtMillis = sourceUpdatedAtMillis
+        )
+    }
+
+    fun parseToeOfficialJson(
+        rawJson: String,
+        queueId: String = "3.1",
+        fetchedAtMillis: Long = System.currentTimeMillis(),
+        isFromCache: Boolean = false
+    ): ScheduleDataset {
+        val root = JSONObject(rawJson)
+        val members = root.optJSONArray("hydra:member")
+            ?: throw IllegalArgumentException("Відсутній розділ hydra:member у графіку")
+
+        val normalizedQueue = queueId.trim()
+        val days = mutableMapOf<KyivDate, DaySchedule>()
+        var latestDateCreateMillis: Long? = null
+
+        for (i in 0 until members.length()) {
+            val member = members.optJSONObject(i) ?: continue
+            val dateGraphRaw = member.optString("dateGraph", "").trim()
+            val dateStr = if (dateGraphRaw.length >= 10) dateGraphRaw.substring(0, 10) else dateGraphRaw
+            val date = parseIsoDate(dateStr) ?: continue
+
+            val dataJson = member.optJSONObject("dataJson") ?: continue
+            val queueObj = findQueueObject(dataJson, normalizedQueue) ?: continue
+            val timesObj = queueObj.optJSONObject("times") ?: queueObj
+
+            val slots = MutableList(48) { SlotState.ON }
+            for (h in 0 until 24) {
+                val hStr = h.toString().padStart(2, '0')
+                val v00 = timesObj.optString("$hStr:00", "0").trim()
+                val v30 = timesObj.optString("$hStr:30", "0").trim()
+                slots[h * 2] = mapToeSlotCode(v00)
+                slots[h * 2 + 1] = mapToeSlotCode(v30)
+            }
+            days[date] = DaySchedule(date = date, slots = slots)
+
+            val dateCreateRaw = member.optString("dateCreate", "").trim()
+            parseToeWallClockTimestampMillis(dateCreateRaw)?.let { ts ->
+                val prev = latestDateCreateMillis
+                if (prev == null || ts > prev) {
+                    latestDateCreateMillis = ts
+                }
+            }
+        }
+
+        if (days.isEmpty()) {
+            throw IllegalArgumentException("Не знайдено даних для черги $queueId")
+        }
+
+        val lastUpdatedLabel = latestDateCreateMillis?.let { KyivTime.formatUpdatedLabel(it) }
+            ?: KyivTime.formatUpdatedLabel(fetchedAtMillis)
+
+        return ScheduleDataset(
+            queueId = queueId,
+            availableQueues = ScheduleDataset.DEFAULT_QUEUES,
+            days = days.toSortedMap(),
+            lastUpdatedLabel = lastUpdatedLabel,
+            fetchedAtMillis = fetchedAtMillis,
+            isFromCache = isFromCache,
+            sourceUpdatedAtMillis = latestDateCreateMillis
+        )
+    }
+
+    private fun mapToeSlotCode(code: String): SlotState = when (code) {
+        "1", "no", "off" -> SlotState.OFF
+        "10", "maybe" -> SlotState.MAYBE
+        else -> SlotState.ON
+    }
+
+    private fun parseToeWallClockTimestampMillis(raw: String): Long? {
+        if (raw.isEmpty()) return null
+        // TOE API formats Kyiv local time with a trailing 'Z' (e.g. 2026-11-25T11:44:27Z).
+        val wallClockRaw = raw.removeSuffix("Z")
+        return parseTimestampMillis(wallClockRaw)
+    }
+
+    internal fun fixOeBoundaryMismatches(slots: List<SlotState>): List<SlotState> {
+        if (slots.size != 48) return slots
+        val fixed = slots.toMutableList()
+        for (h in 0 until 24) {
+            val i1 = h * 2
+            val i2 = i1 + 1
+            // OE_OUTAGE_DATA encodes OFF+MAYBE as msecond (ON+MAYBE); recover OFF when preceded by OFF
+            if (fixed[i1] == SlotState.ON && fixed[i2] == SlotState.MAYBE &&
+                i1 > 0 && fixed[i1 - 1] == SlotState.OFF
+            ) {
+                fixed[i1] = SlotState.OFF
+            }
+            // OE_OUTAGE_DATA encodes MAYBE+OFF as mfirst (MAYBE+ON); recover OFF when followed by OFF
+            if (fixed[i1] == SlotState.MAYBE && fixed[i2] == SlotState.ON &&
+                i2 + 1 < 48 && fixed[i2 + 1] == SlotState.OFF
+            ) {
+                fixed[i2] = SlotState.OFF
+            }
+        }
+        return fixed
+    }
+
+    fun mergeWithToeOfficial(
+        toe: ScheduleDataset,
+        fallback: ScheduleDataset?
+    ): ScheduleDataset {
+        if (fallback == null || fallback.queueId != toe.queueId) return toe
+
+        val mergedDays = fallback.days.toMutableMap()
+        for ((date, toeDay) in toe.days) {
+            mergedDays[date] = toeDay
+        }
+        val queues = if (fallback.availableQueues.size >= toe.availableQueues.size) {
+            fallback.availableQueues
+        } else {
+            toe.availableQueues
+        }
+        return toe.copy(
+            availableQueues = queues,
+            days = mergedDays.toSortedMap(),
+            fetchedAtMillis = maxOf(toe.fetchedAtMillis, fallback.fetchedAtMillis),
+            isFromCache = toe.isFromCache && fallback.isFromCache
         )
     }
 
@@ -284,11 +444,9 @@ object PowerScheduleParser {
                         mergedSlots[i1] = SlotState.MAYBE
                         mergedSlots[i2] = SlotState.OFF
                     }
-                    oe1 == SlotState.ON && oe2 == SlotState.ON && (sb1 == SlotState.OFF || sb2 == SlotState.OFF) -> {
-                        if (sb1 != sb2 || isSecondaryStrictlyNewer) {
-                            mergedSlots[i1] = sb1
-                            mergedSlots[i2] = sb2
-                        }
+                    oe1 == SlotState.ON && oe2 == SlotState.ON && (sb1 == SlotState.OFF || sb2 == SlotState.OFF) && isSecondaryStrictlyNewer -> {
+                        mergedSlots[i1] = sb1
+                        mergedSlots[i2] = sb2
                     }
                     oe1 == SlotState.OFF && oe2 == SlotState.OFF && sb1 == SlotState.ON && sb2 == SlotState.ON && isSecondaryStrictlyNewer -> {
                         mergedSlots[i1] = SlotState.ON

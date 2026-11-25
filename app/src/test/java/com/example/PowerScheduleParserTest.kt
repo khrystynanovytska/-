@@ -488,4 +488,122 @@ class PowerScheduleParserTest {
         assertEquals(SlotState.MAYBE, day.slots[4]) // 02:00-02:30
         assertEquals(SlotState.OFF, day.slots[5])  // 02:30-03:00
     }
+
+    @Test
+    fun `repairs OE_OUTAGE_DATA mfirst and msecond boundary encoding when adjacent to OFF`() {
+        // Real Group 3.1 pattern from 2026-11-25:
+        // 00:30-01:00 MAYBE, 01:00-02:00 OFF, 02:00-02:30 MAYBE
+        // 11:00-11:30 MAYBE, 11:30-15:00 OFF, 15:00-15:30 MAYBE
+        // 18:00-18:30 MAYBE, 18:30-21:30 OFF, 21:30-22:00 MAYBE
+        val date = KyivDate(2026, 11, 25)
+        val midnightEpochSec = KyivTime.epochMillisFor(date, 0) / 1000L
+        val oeJson = """
+            {
+              "fact": {
+                "update": "25.11.2026 11:46",
+                "data": {
+                  "$midnightEpochSec": {
+                    "GPV3.1": {
+                      "1": "msecond",
+                      "2": "no",
+                      "3": "mfirst",
+                      "12": "mfirst",
+                      "13": "no",
+                      "14": "no",
+                      "15": "no",
+                      "16": "mfirst",
+                      "19": "mfirst",
+                      "20": "no",
+                      "21": "no",
+                      "22": "msecond"
+                    }
+                  }
+                }
+              }
+            }
+        """.trimIndent()
+
+        val dataset = PowerScheduleParser.parseJson(oeJson, queueId = "3.1")
+        val day = dataset.days[date]!!
+        val offRanges = PowerScheduleParser.computeTimeRanges(day.slots, SlotState.OFF)
+        val maybeRanges = PowerScheduleParser.computeTimeRanges(day.slots, SlotState.MAYBE)
+
+        assertEquals(
+            listOf("01:00 – 02:00", "11:30 – 15:00", "18:30 – 21:30"),
+            offRanges.map { it.format() }
+        )
+        assertEquals(
+            listOf(
+                "00:30 – 01:00",
+                "02:00 – 02:30",
+                "11:00 – 11:30",
+                "15:00 – 15:30",
+                "18:00 – 18:30",
+                "21:30 – 22:00"
+            ),
+            maybeRanges.map { it.format() }
+        )
+    }
+
+    @Test
+    fun `parses official TOE API Hydra payload with 48 half-hour slots and Kyiv Z timestamp`() {
+        val toeJson = """
+            {
+              "hydra:member": [
+                {
+                  "dateCreate": "2026-11-25T11:44:27Z",
+                  "dateGraph": "2026-11-25T00:00:00Z",
+                  "dataJson": {
+                    "1.2": {
+                      "times": {
+                        "11:00": "0", "11:30": "10",
+                        "12:00": "1", "12:30": "1",
+                        "13:00": "1", "13:30": "1",
+                        "14:00": "1", "14:30": "1",
+                        "15:00": "1", "15:30": "10"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val dataset = PowerScheduleParser.parseToeOfficialJson(toeJson, queueId = "1.2")
+        val day = dataset.days[KyivDate(2026, 11, 25)]!!
+        assertEquals("25.11 11:44", dataset.lastUpdatedLabel)
+        assertEquals(listOf("12:00 – 15:30"), PowerScheduleParser.computeTimeRanges(day.slots, SlotState.OFF).map { it.format() })
+        assertEquals(
+            listOf("11:30 – 12:00", "15:30 – 16:00"),
+            PowerScheduleParser.computeTimeRanges(day.slots, SlotState.MAYBE).map { it.format() }
+        )
+    }
+
+    @Test
+    fun `skips unpublished Svitlobot days with null slots and outages`() {
+        val svitlobotJson = """
+            {
+              "region": "ternopil",
+              "group": "1.1",
+              "source_updated_at": "2026-11-25T03:17:14+02:00",
+              "days": [
+                {
+                  "date": "2026-11-25",
+                  "slots": [1,1,1,1,0,0,0,0,0,0,0,0,1,1,1,1,0,0,1,1,1,1,2,0],
+                  "outages": [["00:00", "04:00"], ["12:00", "16:00"], ["18:00", "22:30"]]
+                },
+                {
+                  "date": "2026-11-26",
+                  "slots": null,
+                  "outages": null
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val parsed = PowerScheduleParser.parseSvitlobotJson(svitlobotJson, queueId = "1.1")
+        assertEquals(1, parsed.days.size)
+        assertTrue(parsed.days.containsKey(KyivDate(2026, 11, 25)))
+        assertFalse(parsed.days.containsKey(KyivDate(2026, 11, 26)))
+    }
 }

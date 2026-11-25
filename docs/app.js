@@ -544,6 +544,24 @@ function parseSvitlobotDaySlots(dayObj) {
   return slots;
 }
 
+function fixOeBoundaryMismatches(slots) {
+  if (!Array.isArray(slots) || slots.length !== 48) return slots;
+  const fixed = [...slots];
+  for (let h = 0; h < 24; h++) {
+    const i1 = h * 2;
+    const i2 = i1 + 1;
+    // OE_OUTAGE_DATA encodes OFF+MAYBE as msecond (ON+MAYBE); recover OFF when preceded by OFF
+    if (fixed[i1] === 'ON' && fixed[i2] === 'MAYBE' && i1 > 0 && fixed[i1 - 1] === 'OFF') {
+      fixed[i1] = 'OFF';
+    }
+    // OE_OUTAGE_DATA encodes MAYBE+OFF as mfirst (MAYBE+ON); recover OFF when followed by OFF
+    if (fixed[i1] === 'MAYBE' && fixed[i2] === 'ON' && i2 + 1 < 48 && fixed[i2 + 1] === 'OFF') {
+      fixed[i2] = 'OFF';
+    }
+  }
+  return fixed;
+}
+
 function parseSvitlobotJson(rawJson, queueId, fetchedAtMillis, isFromCache) {
   const root = JSON.parse(rawJson);
   const rawGroup = root.group ? normalizeQueueId(root.group) : null;
@@ -557,6 +575,9 @@ function parseSvitlobotJson(rawJson, queueId, fetchedAtMillis, isFromCache) {
   const days = {};
   for (const dayObj of root.days) {
     if (!dayObj || !/^\d{4}-\d{2}-\d{2}$/.test(String(dayObj.date || '').trim())) continue;
+    const hasSlots = Array.isArray(dayObj.slots) && dayObj.slots.length > 0;
+    const hasOutages = Array.isArray(dayObj.outages);
+    if (!hasSlots && !hasOutages) continue;
     const dKey = String(dayObj.date).trim();
     days[dKey] = { dateKey: dKey, slots: parseSvitlobotDaySlots(dayObj), hasManualEdits: false };
   }
@@ -619,11 +640,24 @@ function parseJson(rawJson, queueId, fetchedAtMillis, isFromCache) {
       slots[h * 2 + 1] = s2;
     }
 
-    days[dKey] = { dateKey: dKey, slots, hasManualEdits: false };
+    days[dKey] = { dateKey: dKey, slots: fixOeBoundaryMismatches(slots), hasManualEdits: false };
   }
 
   if (Object.keys(days).length === 0) {
     throw new Error(`Не знайдено даних для черги ${queueId}`);
+  }
+
+  // Cross-midnight boundary check between adjacent parsed OE days
+  for (const dKey of Object.keys(days).sort()) {
+    const day = days[dKey];
+    const prevDay = days[addDaysToKey(dKey, -1)];
+    const nextDay = days[addDaysToKey(dKey, 1)];
+    if (prevDay && prevDay.slots[47] === 'OFF' && day.slots[0] === 'ON' && day.slots[1] === 'MAYBE') {
+      day.slots[0] = 'OFF';
+    }
+    if (nextDay && nextDay.slots[0] === 'OFF' && day.slots[46] === 'MAYBE' && day.slots[47] === 'ON') {
+      day.slots[47] = 'OFF';
+    }
   }
 
   const factUpdateRaw = String(fact.update || '').trim();
@@ -680,11 +714,9 @@ function mergeWithSvitlobot(primary, secondary) {
       } else if (oe1 === 'OFF' && oe2 === 'OFF' && sb1 === 'ON' && sb2 === 'OFF') {
         mergedSlots[i1] = 'MAYBE';
         mergedSlots[i2] = 'OFF';
-      } else if (oe1 === 'ON' && oe2 === 'ON' && (sb1 === 'OFF' || sb2 === 'OFF')) {
-        if (sb1 !== sb2 || isSecondaryStrictlyNewer) {
-          mergedSlots[i1] = sb1;
-          mergedSlots[i2] = sb2;
-        }
+      } else if (oe1 === 'ON' && oe2 === 'ON' && (sb1 === 'OFF' || sb2 === 'OFF') && isSecondaryStrictlyNewer) {
+        mergedSlots[i1] = sb1;
+        mergedSlots[i2] = sb2;
       } else if (oe1 === 'OFF' && oe2 === 'OFF' && sb1 === 'ON' && sb2 === 'ON' && isSecondaryStrictlyNewer) {
         mergedSlots[i1] = 'ON';
         mergedSlots[i2] = 'ON';
@@ -1026,7 +1058,6 @@ async function fetchSchedule() {
   refreshBtn.disabled = false;
 
   if (combined) {
-    // Re-parse for currently active queue if user switched mid-request
     if (state.selectedQueue !== targetQueue) {
       const latest = getCachedDataset(state.selectedQueue);
       if (latest) {
@@ -1034,8 +1065,11 @@ async function fetchSchedule() {
         state.error = null;
         state.isLoading = false;
         render();
-        return;
       }
+      if (!hasFreshSvitlobotCache(state.selectedQueue)) {
+        fetchSchedule();
+      }
+      return;
     }
     state.dataset = applyManualSlotOverrides(combined);
     state.error = null;
@@ -1054,6 +1088,9 @@ async function fetchSchedule() {
   }
   state.isLoading = false;
   render();
+  if (state.selectedQueue !== targetQueue && !hasFreshSvitlobotCache(state.selectedQueue)) {
+    fetchSchedule();
+  }
 }
 
 // --- Rendering ---

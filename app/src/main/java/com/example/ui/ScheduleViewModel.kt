@@ -117,6 +117,7 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun refresh(isManual: Boolean = true) {
+        val targetQueue = _uiState.value.selectedQueue
         lastNetworkAttemptMillis = System.currentTimeMillis()
         viewModelScope.launch {
             _uiState.update {
@@ -127,7 +128,11 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
                 }
             }
 
-            val result = repository.fetchSchedule(forceNetwork = true)
+            val result = repository.fetchSchedule(queueId = targetQueue, forceNetwork = true)
+            if (_uiState.value.selectedQueue != targetQueue) {
+                _uiState.update { it.copy(isRefreshing = false) }
+                return@launch
+            }
             val now = System.currentTimeMillis()
             val override = prefs.getActiveManualOverride(now)
 
