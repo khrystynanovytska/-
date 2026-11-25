@@ -17,8 +17,7 @@
   --maybe-start: #B45309;
   --maybe-end: #D97706;
   --maybe-bright: #F59E0B;
-  --split-yellow: #FACC15;
-  --maybe-soft: #FEF3C7;
+  --maybe-soft: #FDE68A;
   --maybe-text: #78350F;
 
   --red-start: #B91C1C;
@@ -48,7 +47,7 @@
   }
 
   .hour-label.mixed {
-    background: rgba(17, 24, 39, 0.92);
+    background: transparent;
     color: #F8FAFC;
   }
 }
@@ -624,7 +623,6 @@ body {
 .t-slot.on { background: var(--green-bright); }
 .t-slot.maybe { background: var(--maybe-bright); }
 .t-slot.off { background: var(--red-bright); }
-.t-hour.split-off-maybe .t-slot.maybe { background: var(--split-yellow); }
 
 .now-marker {
   position: absolute;
@@ -711,13 +709,9 @@ body {
 .hour-half.maybe { background: var(--maybe-soft); }
 .hour-half.off { background: var(--red-soft); }
 
-.hour-halves.mixed .hour-half.on { background: var(--green-bright); }
-.hour-halves.mixed .hour-half.maybe { background: var(--split-yellow); }
-.hour-halves.mixed .hour-half.off { background: var(--red-bright); }
-
 .hour-divider-mid {
-  width: 1.5px;
-  background: rgba(0, 0, 0, 0.25);
+  width: 1px;
+  background: var(--outline);
   flex-shrink: 0;
 }
 
@@ -730,13 +724,9 @@ body {
 .hour-label.maybe { color: var(--maybe-text); }
 .hour-label.off { color: var(--red-text); }
 .hour-label.mixed {
-  background: rgba(255, 255, 255, 0.92);
-  color: #0F172A;
-  font-size: 11px;
-  padding: 1px 4px;
-  border-radius: 6px;
+  background: transparent;
+  color: var(--on-surface);
   font-weight: 700;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14);
 }
 
 .legend-row {
@@ -769,12 +759,12 @@ body {
 .dot-split-off-maybe {
   width: 11px;
   height: 11px;
-  background: linear-gradient(90deg, var(--red-bright) 50%, var(--split-yellow) 50%);
+  background: linear-gradient(90deg, var(--red-bright) 50%, var(--maybe-bright) 50%);
 }
 .dot-split-maybe-off {
   width: 11px;
   height: 11px;
-  background: linear-gradient(90deg, var(--split-yellow) 50%, var(--red-bright) 50%);
+  background: linear-gradient(90deg, var(--maybe-bright) 50%, var(--red-bright) 50%);
 }
 .dot-now { background: var(--on-bg); }
 

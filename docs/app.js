@@ -887,10 +887,8 @@ function render() {
       for (let hr = 0; hr < 24; hr++) {
         const s1 = activeDay.slots[hr * 2] || 'ON';
         const s2 = activeDay.slots[hr * 2 + 1] || 'ON';
-        const isSplit = s1 !== s2;
-        const isOffMaybePair = (s1 === 'OFF' && s2 === 'MAYBE') || (s1 === 'MAYBE' && s2 === 'OFF');
         const hrBlock = document.createElement('div');
-        hrBlock.className = `t-hour${isSplit ? ' split' : ''}${isOffMaybePair ? ' split-off-maybe' : ''}`;
+        hrBlock.className = `t-hour${s1 !== s2 ? ' split' : ''}`;
 
         const half1 = document.createElement('div');
         half1.className = `t-slot ${s1.toLowerCase()}`;
@@ -936,7 +934,7 @@ function render() {
         btn.setAttribute('aria-label', `Година ${String(hr).padStart(2, '0')}:00`);
 
         const halves = document.createElement('span');
-        halves.className = `hour-halves${s1 !== s2 ? ' mixed' : ''}`;
+        halves.className = 'hour-halves';
         const h1 = document.createElement('span');
         h1.className = `hour-half ${s1.toLowerCase()}`;
         const h2 = document.createElement('span');

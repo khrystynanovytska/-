@@ -115,7 +115,6 @@ import com.example.ui.theme.PowerOnGreenEnd
 import com.example.ui.theme.PowerOnGreenSoftDark
 import com.example.ui.theme.PowerOnGreenSoftLight
 import com.example.ui.theme.PowerOnGreenStart
-import com.example.ui.theme.PowerSplitYellow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -861,7 +860,7 @@ private fun DailyScheduleCard(
                     )
                     SplitLegendDot(
                         leftColor = PowerOffRedBright,
-                        rightColor = PowerSplitYellow,
+                        rightColor = AmberWarning,
                         label = stringResource(R.string.legend_split_off_maybe)
                     )
                     if (!isViewingTomorrow) {
@@ -958,9 +957,9 @@ private fun Timeline24hBar(
                 )
             }
 
-            fun colorFor(state: SlotState, isOffMaybePair: Boolean) = when (state) {
+            fun colorFor(state: SlotState) = when (state) {
                 SlotState.ON -> PowerOnGreenBright
-                SlotState.MAYBE -> if (isOffMaybePair) PowerSplitYellow else AmberWarning
+                SlotState.MAYBE -> AmberWarning
                 SlotState.OFF -> PowerOffRedBright
             }
 
@@ -971,22 +970,20 @@ private fun Timeline24hBar(
                     val halfWidth = blockWidth / 2f
                     val firstHalf = slots.getOrElse(h * 2) { SlotState.ON }
                     val secondHalf = slots.getOrElse(h * 2 + 1) { SlotState.ON }
-                    val isOffMaybePair = (firstHalf == SlotState.OFF && secondHalf == SlotState.MAYBE) ||
-                        (firstHalf == SlotState.MAYBE && secondHalf == SlotState.OFF)
 
                     drawRect(
-                        color = colorFor(firstHalf, isOffMaybePair),
+                        color = colorFor(firstHalf),
                         topLeft = Offset(x, topY),
                         size = Size(halfWidth, barHeight)
                     )
                     drawRect(
-                        color = colorFor(secondHalf, isOffMaybePair),
+                        color = colorFor(secondHalf),
                         topLeft = Offset(x + halfWidth, topY),
                         size = Size(blockWidth - halfWidth, barHeight)
                     )
                     if (firstHalf != secondHalf) {
                         drawLine(
-                            color = Color.Black.copy(alpha = 0.28f),
+                            color = Color.Black.copy(alpha = 0.25f),
                             start = Offset(x + halfWidth, topY),
                             end = Offset(x + halfWidth, topY + barHeight),
                             strokeWidth = 0.8.dp.toPx()
@@ -1046,12 +1043,6 @@ private fun HourlyMatrixGrid(
         SlotState.OFF -> offBg
     }
 
-    fun splitBgFor(state: SlotState) = when (state) {
-        SlotState.ON -> PowerOnGreenBright
-        SlotState.MAYBE -> PowerSplitYellow
-        SlotState.OFF -> PowerOffRedBright
-    }
-
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         for (rowIdx in 0 until 6) {
             Row(
@@ -1100,50 +1091,32 @@ private fun HourlyMatrixGrid(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxSize()
-                                    .background(if (bothSame) bgFor(firstHalf) else splitBgFor(firstHalf))
+                                    .background(bgFor(firstHalf))
                             )
                             if (!bothSame) {
                                 Box(
                                     modifier = Modifier
-                                        .width(1.5.dp)
+                                        .width(1.dp)
                                         .fillMaxHeight()
-                                        .background(Color.Black.copy(alpha = 0.25f))
+                                        .background(MaterialTheme.colorScheme.outline)
                                 )
                             }
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxSize()
-                                    .background(if (bothSame) bgFor(secondHalf) else splitBgFor(secondHalf))
+                                    .background(bgFor(secondHalf))
                             )
                         }
 
-                        if (bothSame) {
-                            Text(
-                                text = String.format("%02d:00", hour),
-                                style = MaterialTheme.typography.labelMedium.copy(
-                                    fontFamily = JetBrainsMonoFontFamily,
-                                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium
-                                ),
-                                color = labelColor
-                            )
-                        } else {
-                            Surface(
-                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                                shape = RoundedCornerShape(6.dp),
-                                shadowElevation = 1.dp
-                            ) {
-                                Text(
-                                    text = String.format("%02d:00", hour),
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontFamily = JetBrainsMonoFontFamily,
-                                        fontWeight = FontWeight.Bold
-                                    ),
-                                    color = labelColor,
-                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                )
-                            }
-                        }
+                        Text(
+                            text = String.format("%02d:00", hour),
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontFamily = JetBrainsMonoFontFamily,
+                                fontWeight = if (isCurrent || !bothSame) FontWeight.Bold else FontWeight.Medium
+                            ),
+                            color = labelColor
+                        )
                     }
                 }
             }
@@ -1499,12 +1472,12 @@ private fun EditHourDialog(
                     listOf(
                         Triple(
                             SlotState.OFF to SlotState.MAYBE,
-                            PowerOffRedBright to PowerSplitYellow,
+                            PowerOffRedBright to AmberWarning,
                             stringResource(R.string.split_off_maybe) to "edit_hour_off_maybe"
                         ),
                         Triple(
                             SlotState.MAYBE to SlotState.OFF,
-                            PowerSplitYellow to PowerOffRedBright,
+                            AmberWarning to PowerOffRedBright,
                             stringResource(R.string.split_maybe_off) to "edit_hour_maybe_off"
                         )
                     ).forEach { (pair, colors, labelAndTag) ->
