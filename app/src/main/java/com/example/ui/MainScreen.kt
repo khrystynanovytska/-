@@ -562,15 +562,27 @@ private fun HeroStatusCard(
                             )
 
                             if (snapshot.nextChangeTimeLabel != null) {
+                                val nextTime = snapshot.nextChangeTimeLabel
+                                val isTomorrowLabel = nextTime.startsWith("завтра")
                                 Text(
                                     text = when (snapshot.nextChangeTargetState) {
-                                        SlotState.ON -> stringResource(R.string.next_on_at, snapshot.nextChangeTimeLabel)
-                                        SlotState.MAYBE -> if (snapshot.effectiveState == SlotState.ON) {
-                                            stringResource(R.string.next_maybe_at, snapshot.nextChangeTimeLabel)
+                                        SlotState.ON -> if (isTomorrowLabel) {
+                                            "Увімкнення $nextTime"
                                         } else {
-                                            stringResource(R.string.next_maybe_from, snapshot.nextChangeTimeLabel)
+                                            stringResource(R.string.next_on_at, nextTime)
                                         }
-                                        SlotState.OFF, null -> stringResource(R.string.next_off_at, snapshot.nextChangeTimeLabel)
+                                        SlotState.MAYBE -> if (snapshot.effectiveState == SlotState.ON) {
+                                            if (isTomorrowLabel) "Можливе вимкнення $nextTime"
+                                            else stringResource(R.string.next_maybe_at, nextTime)
+                                        } else {
+                                            if (isTomorrowLabel) "Можливі відключення $nextTime"
+                                            else stringResource(R.string.next_maybe_from, nextTime)
+                                        }
+                                        SlotState.OFF, null -> if (isTomorrowLabel) {
+                                            "Вимкнення $nextTime"
+                                        } else {
+                                            stringResource(R.string.next_off_at, nextTime)
+                                        }
                                     },
                                     style = MaterialTheme.typography.labelLarge,
                                     color = Color.White.copy(alpha = 0.92f)

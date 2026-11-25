@@ -292,6 +292,9 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
             }
             OutageAlarmScheduler.rescheduleAlerts(context, reparsed, now)
             PowerStatusWidgetProvider.updateAllWidgets(context, reparsed, now)
+            if (!repository.hasFreshSvitlobotCache(activeProfile.queueId, now)) {
+                refresh(isManual = false)
+            }
         } else {
             _uiState.update {
                 it.copy(

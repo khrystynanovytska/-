@@ -88,7 +88,8 @@ data class ScheduleDataset(
     val days: Map<KyivDate, DaySchedule>,
     val lastUpdatedLabel: String?,
     val fetchedAtMillis: Long,
-    val isFromCache: Boolean
+    val isFromCache: Boolean,
+    val sourceUpdatedAtMillis: Long? = null
 ) {
     companion object {
         val DEFAULT_QUEUES = listOf(

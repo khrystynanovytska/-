@@ -1,9 +1,9 @@
 'use strict';
 
-const FEED_URLS = [
-  'https://raw.githubusercontent.com/yaroslav2901/OE_OUTAGE_DATA/main/data/Ternopiloblenerho.json',
-  'https://raw.githubusercontent.com/Baskerville42/outage-data-ua/main/data/ternopiloblenergo.json'
+const OE_FEED_URLS = [
+  'https://raw.githubusercontent.com/yaroslav2901/OE_OUTAGE_DATA/main/data/Ternopiloblenerho.json'
 ];
+const SVITLOBOT_BASE_URL = 'https://raw.githubusercontent.com/Svitlobot-official/timetables/main/ternopil';
 
 const DEFAULT_QUEUES = [
   '1.1', '1.2', '2.1', '2.2',
@@ -334,16 +334,22 @@ function setManualLive(slotState, expiresAtMillis) {
 
 // --- Parser & Snapshot ---
 function normalizeQueueId(rawKey) {
-  const cleaned = rawKey.trim()
+  const cleaned = String(rawKey || '').trim()
     .replace(/^gpv/i, '')
-    .replace(/^_/, '')
-    .replace(/_/g, '.');
+    .replace(/^[-_]/, '')
+    .replace(/[-_\s]/g, '.');
   return /^\d+\.\d+$/.test(cleaned) ? cleaned : null;
 }
 
 function findQueueObject(dayQueues, queueId) {
   const norm = queueId.trim();
-  const candidates = [`GPV${norm}`, `gpv${norm}`, norm, `GPV_${norm.replace('.', '_')}`];
+  const candidates = [
+    `GPV${norm}`,
+    `gpv${norm}`,
+    norm,
+    `GPV_${norm.replace('.', '_')}`,
+    `GPV-${norm.replace('.', '-')}`
+  ];
   for (const k of candidates) {
     if (dayQueues[k]) return dayQueues[k];
   }
@@ -354,33 +360,233 @@ function findQueueObject(dayQueues, queueId) {
 }
 
 function mapHourStatus(status) {
-  const norm = String(status || '').trim().toLowerCase().replace(/[+/]/g, '_');
+  const norm = String(status || '').trim().toLowerCase().replace(/[+/\-\s]+/g, '_');
   switch (norm) {
-    case 'yes': return ['ON', 'ON'];
-    case 'no': return ['OFF', 'OFF'];
-    case 'first': return ['OFF', 'ON'];
-    case 'mfirst': return ['MAYBE', 'ON'];
-    case 'second': return ['ON', 'OFF'];
-    case 'msecond': return ['ON', 'MAYBE'];
-    case 'maybe': return ['MAYBE', 'MAYBE'];
+    case 'yes':
+    case 'on':
+      return ['ON', 'ON'];
+    case 'no':
+    case 'off':
+      return ['OFF', 'OFF'];
+    case 'first':
+    case 'first_yes':
+    case 'first_on':
+    case 'off_on':
+    case 'no_yes':
+      return ['OFF', 'ON'];
+    case 'mfirst':
+    case 'mfirst_yes':
+    case 'maybe_yes':
+    case 'maybe_on':
+      return ['MAYBE', 'ON'];
+    case 'second':
+    case 'yes_second':
+    case 'on_second':
+    case 'on_off':
+    case 'yes_no':
+      return ['ON', 'OFF'];
+    case 'msecond':
+    case 'yes_msecond':
+    case 'yes_maybe':
+    case 'on_maybe':
+      return ['ON', 'MAYBE'];
+    case 'maybe':
+      return ['MAYBE', 'MAYBE'];
     case 'first_msecond':
     case 'first_maybe':
     case 'no_msecond':
     case 'no_maybe':
     case 'off_maybe':
+    case 'off_msecond':
       return ['OFF', 'MAYBE'];
     case 'mfirst_second':
     case 'maybe_second':
     case 'mfirst_no':
     case 'maybe_no':
     case 'maybe_off':
+    case 'mfirst_off':
       return ['MAYBE', 'OFF'];
     default: return ['ON', 'ON'];
   }
 }
 
+function parseTimestampMillis(raw) {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return null;
+
+  const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/);
+  if (isoMatch) {
+    const [, y, m, d, hh, mm, ss, tz] = isoMatch;
+    if (tz) {
+      const normTz = tz === 'Z' ? 'Z' : (tz.length === 5 ? `${tz.slice(0, 3)}:${tz.slice(3)}` : tz);
+      const ms = Date.parse(`${y}-${m}-${d}T${hh}:${mm}:${ss || '00'}${normTz}`);
+      return Number.isFinite(ms) ? ms : null;
+    }
+    const key = dateKey(Number(y), Number(m), Number(d));
+    return kyivEpochMillisFor(key, Number(hh) * 60 + Number(mm)) + Number(ss || 0) * 1000;
+  }
+
+  const uaMatch = trimmed.match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (uaMatch) {
+    const [, d, m, y, hh, mm, ss] = uaMatch;
+    const key = dateKey(Number(y), Number(m), Number(d));
+    return kyivEpochMillisFor(key, Number(hh) * 60 + Number(mm)) + Number(ss || 0) * 1000;
+  }
+
+  const shortUaMatch = trimmed.match(/^(\d{2})\.(\d{2})\s+(\d{2}):(\d{2})$/);
+  if (shortUaMatch) {
+    const [, d, m, hh, mm] = shortUaMatch;
+    const nowYear = getKyivParts(Date.now()).year;
+    const key = dateKey(nowYear, Number(m), Number(d));
+    return kyivEpochMillisFor(key, Number(hh) * 60 + Number(mm));
+  }
+
+  return null;
+}
+
+function parseDayKey(tsKey) {
+  const trimmed = String(tsKey || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const epochSec = Number(trimmed);
+  if (Number.isFinite(epochSec) && trimmed !== '') {
+    return kyivDateKeyFromEpochMs(epochSec * 1000);
+  }
+  return null;
+}
+
+function parseHHmmToMinutes(raw, isEnd) {
+  const m = String(raw || '').trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (hh === 24 && mm === 0) return 1440;
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  if (isEnd && hh === 0 && mm === 0) return 1440;
+  if (isEnd && hh === 23 && mm === 59) return 1440;
+  return hh * 60 + mm;
+}
+
+function parseOutageRangesMask(outagesArr) {
+  if (!Array.isArray(outagesArr) || outagesArr.length === 0) return null;
+  const mask = new Array(48).fill(false);
+  let parsedAny = false;
+  for (const item of outagesArr) {
+    let startMin = null;
+    let endMin = null;
+    if (Array.isArray(item) && item.length >= 2) {
+      startMin = parseHHmmToMinutes(item[0], false);
+      endMin = parseHHmmToMinutes(item[1], true);
+    } else if (typeof item === 'string') {
+      const parts = item.split(/[-–—]/);
+      if (parts.length === 2) {
+        startMin = parseHHmmToMinutes(parts[0], false);
+        endMin = parseHHmmToMinutes(parts[1], true);
+      }
+    }
+    if (startMin !== null && endMin !== null && endMin > startMin) {
+      parsedAny = true;
+      for (let i = 0; i < 48; i++) {
+        const sStart = i * 30;
+        const sEnd = sStart + 30;
+        if (startMin < sEnd && endMin > sStart) {
+          mask[i] = true;
+        }
+      }
+    }
+  }
+  return parsedAny ? mask : null;
+}
+
+function parseSvitlobotDaySlots(dayObj) {
+  const slots = new Array(48).fill('ON');
+  const rawSlots = dayObj.slots;
+  const hasHourSlots = Array.isArray(rawSlots) && rawSlots.length >= 24;
+
+  if (Array.isArray(rawSlots)) {
+    if (rawSlots.length === 48) {
+      for (let i = 0; i < 48; i++) {
+        const v = String(rawSlots[i] ?? '0').trim().toLowerCase();
+        slots[i] = (v === '1' || v === 'no' || v === 'off') ? 'OFF' : ((v === '2' || v === 'maybe') ? 'MAYBE' : 'ON');
+      }
+    } else if (rawSlots.length >= 24) {
+      for (let h = 0; h < 24; h++) {
+        const v = String(rawSlots[h] ?? '0').trim().toLowerCase();
+        let pair;
+        if (v === '0') pair = ['ON', 'ON'];
+        else if (v === '1') pair = ['OFF', 'OFF'];
+        else if (v === '2') pair = ['OFF', 'ON'];
+        else if (v === '3') pair = ['ON', 'OFF'];
+        else pair = mapHourStatus(v);
+        slots[h * 2] = pair[0];
+        slots[h * 2 + 1] = pair[1];
+      }
+    }
+  }
+
+  const mask = parseOutageRangesMask(dayObj.outages);
+  if (mask) {
+    if (!hasHourSlots) {
+      for (let i = 0; i < 48; i++) {
+        if (mask[i]) slots[i] = 'OFF';
+      }
+    } else {
+      for (let h = 0; h < 24; h++) {
+        const m1 = mask[h * 2];
+        const m2 = mask[h * 2 + 1];
+        if (m1 !== m2) {
+          slots[h * 2] = m1 ? 'OFF' : 'ON';
+          slots[h * 2 + 1] = m2 ? 'OFF' : 'ON';
+        }
+      }
+    }
+  }
+
+  return slots;
+}
+
+function parseSvitlobotJson(rawJson, queueId, fetchedAtMillis, isFromCache) {
+  const root = JSON.parse(rawJson);
+  const rawGroup = root.group ? normalizeQueueId(root.group) : null;
+  if (rawGroup && rawGroup !== queueId.trim()) {
+    throw new Error(`Дані належать іншій черзі (${rawGroup})`);
+  }
+  if (!Array.isArray(root.days)) {
+    throw new Error('Відсутній розділ days у графіку');
+  }
+
+  const days = {};
+  for (const dayObj of root.days) {
+    if (!dayObj || !/^\d{4}-\d{2}-\d{2}$/.test(String(dayObj.date || '').trim())) continue;
+    const dKey = String(dayObj.date).trim();
+    days[dKey] = { dateKey: dKey, slots: parseSvitlobotDaySlots(dayObj), hasManualEdits: false };
+  }
+
+  if (Object.keys(days).length === 0) {
+    throw new Error(`Не знайдено даних для черги ${queueId}`);
+  }
+
+  const sourceUpdatedRaw = String(root.source_updated_at || '').trim();
+  const updatedRaw = String(root.updated_at || '').trim();
+  const bestRaw = sourceUpdatedRaw || updatedRaw;
+  const sourceUpdatedAtMillis = parseTimestampMillis(sourceUpdatedRaw) ?? parseTimestampMillis(updatedRaw);
+  const lastUpdatedLabel = formatUpdatedLabel(bestRaw, fetchedAtMillis);
+
+  return {
+    queueId,
+    availableQueues: [...DEFAULT_QUEUES],
+    days,
+    lastUpdatedLabel,
+    fetchedAtMillis,
+    isFromCache,
+    sourceUpdatedAtMillis
+  };
+}
+
 function parseJson(rawJson, queueId, fetchedAtMillis, isFromCache) {
   const root = JSON.parse(rawJson);
+  if (Array.isArray(root.days)) {
+    return parseSvitlobotJson(rawJson, queueId, fetchedAtMillis, isFromCache);
+  }
   const fact = root.fact;
   const dataObj = fact && fact.data;
   if (!dataObj) throw new Error('Відсутній розділ fact.data у графіку');
@@ -389,8 +595,8 @@ function parseJson(rawJson, queueId, fetchedAtMillis, isFromCache) {
   const discoveredQueues = new Set();
 
   for (const tsKey of Object.keys(dataObj)) {
-    const epochSec = Number(tsKey);
-    if (!Number.isFinite(epochSec)) continue;
+    const dKey = parseDayKey(tsKey);
+    if (!dKey) continue;
     const dayQueues = dataObj[tsKey];
     if (!dayQueues || typeof dayQueues !== 'object') continue;
 
@@ -401,16 +607,18 @@ function parseJson(rawJson, queueId, fetchedAtMillis, isFromCache) {
 
     const queueObj = findQueueObject(dayQueues, queueId);
     if (!queueObj) continue;
+    const isZeroIndexed = Object.prototype.hasOwnProperty.call(queueObj, '0') &&
+      !Object.prototype.hasOwnProperty.call(queueObj, '24');
 
     const slots = new Array(48).fill('ON');
-    for (let hour = 1; hour <= 24; hour++) {
-      const status = String(queueObj[String(hour)] || 'yes').trim().toLowerCase();
+    for (let h = 0; h < 24; h++) {
+      const key = String(isZeroIndexed ? h : h + 1);
+      const status = String(queueObj[key] || 'yes').trim().toLowerCase();
       const [s1, s2] = mapHourStatus(status);
-      slots[(hour - 1) * 2] = s1;
-      slots[(hour - 1) * 2 + 1] = s2;
+      slots[h * 2] = s1;
+      slots[h * 2 + 1] = s2;
     }
 
-    const dKey = kyivDateKeyFromEpochMs(epochSec * 1000);
     days[dKey] = { dateKey: dKey, slots, hasManualEdits: false };
   }
 
@@ -418,19 +626,84 @@ function parseJson(rawJson, queueId, fetchedAtMillis, isFromCache) {
     throw new Error(`Не знайдено даних для черги ${queueId}`);
   }
 
-  const lastUpdatedLabel = formatUpdatedLabel(fact.update || root.lastUpdated || '', fetchedAtMillis);
+  const factUpdateRaw = String(fact.update || '').trim();
+  const rootUpdateRaw = String(root.lastUpdated || '').trim();
+  const lastUpdatedLabel = formatUpdatedLabel(factUpdateRaw || rootUpdateRaw, fetchedAtMillis);
+  const sourceUpdatedAtMillis = parseTimestampMillis(factUpdateRaw) ?? parseTimestampMillis(rootUpdateRaw);
   const availableQueues = discoveredQueues.size > 0
     ? Array.from(discoveredQueues).sort()
     : [...DEFAULT_QUEUES];
 
-  return applyManualSlotOverrides({
+  return {
     queueId,
     availableQueues,
     days,
     lastUpdatedLabel,
     fetchedAtMillis,
-    isFromCache
-  });
+    isFromCache,
+    sourceUpdatedAtMillis
+  };
+}
+
+function mergeWithSvitlobot(primary, secondary) {
+  if (!primary || !secondary || primary.queueId !== secondary.queueId) return primary;
+
+  const pTs = primary.sourceUpdatedAtMillis;
+  const sTs = secondary.sourceUpdatedAtMillis;
+  const toleranceMs = 5 * 60 * 1000;
+
+  if (pTs != null && sTs != null && sTs < pTs - toleranceMs) {
+    return primary;
+  }
+  const isSecondaryStrictlyNewer = pTs != null && sTs != null && sTs > pTs + toleranceMs;
+
+  const mergedDays = { ...primary.days };
+  for (const [dKey, sbDay] of Object.entries(secondary.days)) {
+    const oeDay = mergedDays[dKey];
+    if (!oeDay) {
+      mergedDays[dKey] = sbDay;
+      continue;
+    }
+
+    const mergedSlots = [...oeDay.slots];
+    for (let h = 0; h < 24; h++) {
+      const i1 = h * 2;
+      const i2 = i1 + 1;
+      const oe1 = oeDay.slots[i1];
+      const oe2 = oeDay.slots[i2];
+      const sb1 = sbDay.slots[i1];
+      const sb2 = sbDay.slots[i2];
+
+      if (oe1 === 'OFF' && oe2 === 'OFF' && sb1 === 'OFF' && sb2 === 'ON') {
+        mergedSlots[i1] = 'OFF';
+        mergedSlots[i2] = 'MAYBE';
+      } else if (oe1 === 'OFF' && oe2 === 'OFF' && sb1 === 'ON' && sb2 === 'OFF') {
+        mergedSlots[i1] = 'MAYBE';
+        mergedSlots[i2] = 'OFF';
+      } else if (oe1 === 'ON' && oe2 === 'ON' && (sb1 === 'OFF' || sb2 === 'OFF')) {
+        if (sb1 !== sb2 || isSecondaryStrictlyNewer) {
+          mergedSlots[i1] = sb1;
+          mergedSlots[i2] = sb2;
+        }
+      } else if (oe1 === 'OFF' && oe2 === 'OFF' && sb1 === 'ON' && sb2 === 'ON' && isSecondaryStrictlyNewer) {
+        mergedSlots[i1] = 'ON';
+        mergedSlots[i2] = 'ON';
+      } else if ((oe1 === 'MAYBE' || oe2 === 'MAYBE') && (sb1 === 'OFF' || sb2 === 'OFF') && isSecondaryStrictlyNewer) {
+        mergedSlots[i1] = sb1 === 'OFF' ? 'OFF' : oe1;
+        mergedSlots[i2] = sb2 === 'OFF' ? 'OFF' : oe2;
+      }
+    }
+    mergedDays[dKey] = { ...oeDay, slots: mergedSlots };
+  }
+
+  return {
+    ...primary,
+    days: mergedDays,
+    lastUpdatedLabel: (isSecondaryStrictlyNewer && secondary.lastUpdatedLabel) ? secondary.lastUpdatedLabel : primary.lastUpdatedLabel,
+    fetchedAtMillis: Math.max(primary.fetchedAtMillis, secondary.fetchedAtMillis),
+    isFromCache: primary.isFromCache && secondary.isFromCache,
+    sourceUpdatedAtMillis: isSecondaryStrictlyNewer ? sTs : pTs
+  };
 }
 
 function applyManualSlotOverrides(dataset) {
@@ -633,64 +906,151 @@ function computeSnapshot(dataset, nowMs, manualOverride) {
 }
 
 // --- Network & Cache ---
+function svitlobotJsonKey(queueId) {
+  return `svitlo31_svitlobot_json_${queueId.trim()}`;
+}
+
+function svitlobotFetchedKey(queueId) {
+  return `svitlo31_svitlobot_at_${queueId.trim()}`;
+}
+
+function hasFreshSvitlobotCache(queueId = state.selectedQueue, nowMs = Date.now()) {
+  const fetchedAt = Number(localStorage.getItem(svitlobotFetchedKey(queueId)) || '0');
+  return fetchedAt > 0 && (nowMs - fetchedAt) < AUTO_REFRESH_MS;
+}
+
 function getCachedDataset(queueId = state.selectedQueue) {
-  const raw = localStorage.getItem(KEYS.CACHED_JSON);
-  if (!raw) return null;
-  const fetchedAt = Number(localStorage.getItem(KEYS.FETCHED_AT) || '0');
-  try {
-    return parseJson(raw, queueId, fetchedAt, true);
-  } catch {
-    return null;
+  const rawOe = localStorage.getItem(KEYS.CACHED_JSON);
+  const oeFetchedAt = Number(localStorage.getItem(KEYS.FETCHED_AT) || '0');
+  const rawSb = localStorage.getItem(svitlobotJsonKey(queueId));
+  const sbFetchedAt = Number(localStorage.getItem(svitlobotFetchedKey(queueId)) || '0');
+
+  let oeParsed = null;
+  if (rawOe) {
+    try { oeParsed = parseJson(rawOe, queueId, oeFetchedAt, true); } catch {}
   }
+  let sbParsed = null;
+  if (rawSb) {
+    try { sbParsed = parseSvitlobotJson(rawSb, queueId, sbFetchedAt, true); } catch {}
+  }
+
+  let combined = null;
+  if (oeParsed && sbParsed) combined = mergeWithSvitlobot(oeParsed, sbParsed);
+  else if (oeParsed) combined = oeParsed;
+  else if (sbParsed) combined = sbParsed;
+
+  return combined ? applyManualSlotOverrides(combined) : null;
 }
 
 const AUTO_REFRESH_MS = 15 * 60 * 1000;
 let isFetching = false;
 let lastFetchAttemptMs = 0;
 
+async function fetchWithTimeout(url, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resp = await fetch(url, { cache: 'no-store', signal: controller.signal });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return await resp.text();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchOeFeed(queueId, cacheBust) {
+  let lastErr = null;
+  for (const url of OE_FEED_URLS) {
+    try {
+      const text = await fetchWithTimeout(`${url}?t=${cacheBust}`, 12000);
+      const now = Date.now();
+      const parsed = parseJson(text, queueId, now, false);
+      localStorage.setItem(KEYS.CACHED_JSON, text);
+      localStorage.setItem(KEYS.FETCHED_AT, String(now));
+      return parsed;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('Не вдалося завантажити основний графік');
+}
+
+async function fetchSvitlobotFeed(queueId, cacheBust) {
+  let lastErr = null;
+  const q = queueId.trim();
+  const candidates = Array.from(new Set([
+    `${SVITLOBOT_BASE_URL}/${q}.json`,
+    `${SVITLOBOT_BASE_URL}/${q.replace('.', '-')}.json`
+  ]));
+  for (const url of candidates) {
+    try {
+      const text = await fetchWithTimeout(`${url}?t=${cacheBust}`, 5000);
+      const now = Date.now();
+      const parsed = parseSvitlobotJson(text, q, now, false);
+      localStorage.setItem(svitlobotJsonKey(q), text);
+      localStorage.setItem(svitlobotFetchedKey(q), String(now));
+      return parsed;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('Не знайдено додаткових даних');
+}
+
 async function fetchSchedule() {
   if (isFetching) return;
   isFetching = true;
   lastFetchAttemptMs = Date.now();
+  const targetQueue = state.selectedQueue;
 
   const refreshBtn = document.getElementById('btn-refresh');
   refreshBtn.classList.add('spinning');
   refreshBtn.disabled = true;
 
   const cacheBust = Math.floor(Date.now() / 60000);
-  let lastErr = null;
-  for (const url of FEED_URLS) {
-    try {
-      const resp = await fetch(`${url}?t=${cacheBust}`, { cache: 'no-store' });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const text = await resp.text();
-      const now = Date.now();
-      const parsed = parseJson(text, state.selectedQueue, now, false);
-      localStorage.setItem(KEYS.CACHED_JSON, text);
-      localStorage.setItem(KEYS.FETCHED_AT, String(now));
-      state.dataset = parsed;
-      state.error = null;
-      state.isLoading = false;
-      isFetching = false;
-      refreshBtn.classList.remove('spinning');
-      refreshBtn.disabled = false;
-      render();
-      return;
-    } catch (err) {
-      lastErr = err;
-    }
-  }
+  const [oeRes, sbRes] = await Promise.allSettled([
+    fetchOeFeed(targetQueue, cacheBust),
+    fetchSvitlobotFeed(targetQueue, cacheBust)
+  ]);
+
+  const oeDataset = oeRes.status === 'fulfilled' ? oeRes.value : null;
+  const sbDataset = sbRes.status === 'fulfilled' ? sbRes.value : null;
+
+  let combined = null;
+  if (oeDataset && sbDataset) combined = mergeWithSvitlobot(oeDataset, sbDataset);
+  else if (oeDataset) combined = oeDataset;
+  else if (sbDataset) combined = sbDataset;
 
   isFetching = false;
   refreshBtn.classList.remove('spinning');
   refreshBtn.disabled = false;
+
+  if (combined) {
+    // Re-parse for currently active queue if user switched mid-request
+    if (state.selectedQueue !== targetQueue) {
+      const latest = getCachedDataset(state.selectedQueue);
+      if (latest) {
+        state.dataset = latest;
+        state.error = null;
+        state.isLoading = false;
+        render();
+        return;
+      }
+    }
+    state.dataset = applyManualSlotOverrides(combined);
+    state.error = null;
+    state.isLoading = false;
+    render();
+    return;
+  }
 
   const cached = getCachedDataset();
   if (cached) {
     state.dataset = cached;
     state.error = null;
   } else if (!state.dataset) {
-    state.error = lastErr ? lastErr.message : 'Перевірте інтернет-з’єднання';
+    const err = oeRes.status === 'rejected' ? oeRes.reason : (sbRes.status === 'rejected' ? sbRes.reason : null);
+    state.error = err ? err.message : 'Перевірте інтернет-з’єднання';
   }
   state.isLoading = false;
   render();
@@ -815,14 +1175,16 @@ function render() {
 
       const nextLabelEl = document.getElementById('next-change-label');
       if (snap.nextChangeTimeLabel) {
+        const nextTime = snap.nextChangeTimeLabel;
+        const isTomorrowLabel = nextTime.startsWith('завтра');
         nextLabelEl.hidden = false;
         nextLabelEl.textContent = snap.nextChangeTargetState === 'ON'
-          ? `Увімкнення о ${snap.nextChangeTimeLabel}`
+          ? (isTomorrowLabel ? `Увімкнення ${nextTime}` : `Увімкнення о ${nextTime}`)
           : (snap.nextChangeTargetState === 'MAYBE'
             ? (snap.effectiveState === 'ON'
-              ? `Можливе вимкнення о ${snap.nextChangeTimeLabel}`
-              : `Можливі відключення з ${snap.nextChangeTimeLabel}`)
-            : `Вимкнення о ${snap.nextChangeTimeLabel}`);
+              ? (isTomorrowLabel ? `Можливе вимкнення ${nextTime}` : `Можливе вимкнення о ${nextTime}`)
+              : (isTomorrowLabel ? `Можливі відключення ${nextTime}` : `Можливі відключення з ${nextTime}`))
+            : (isTomorrowLabel ? `Вимкнення ${nextTime}` : `Вимкнення о ${nextTime}`));
       } else {
         nextLabelEl.hidden = true;
       }
@@ -1018,6 +1380,9 @@ function activateProfile(profileId) {
   if (reparsed) {
     state.dataset = reparsed;
     render();
+    if (!hasFreshSvitlobotCache(state.selectedQueue)) {
+      fetchSchedule();
+    }
   } else {
     render();
     fetchSchedule();
@@ -1266,6 +1631,9 @@ function wireEvents() {
     if (reparsed) {
       state.dataset = reparsed;
       render();
+      if (!hasFreshSvitlobotCache(state.selectedQueue)) {
+        fetchSchedule();
+      }
     } else {
       render();
       fetchSchedule();
