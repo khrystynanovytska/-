@@ -108,17 +108,20 @@ object PowerScheduleParser {
         return null
     }
 
-    internal fun mapHourStatus(status: String): Pair<SlotState, SlotState> = when (status) {
-        "yes" -> SlotState.ON to SlotState.ON
-        "no" -> SlotState.OFF to SlotState.OFF
-        "first" -> SlotState.OFF to SlotState.ON
-        "mfirst" -> SlotState.MAYBE to SlotState.ON
-        "second" -> SlotState.ON to SlotState.OFF
-        "msecond" -> SlotState.ON to SlotState.MAYBE
-        "maybe" -> SlotState.MAYBE to SlotState.MAYBE
-        "first_msecond", "first_maybe", "no_msecond", "off_maybe" -> SlotState.OFF to SlotState.MAYBE
-        "mfirst_second", "maybe_second", "mfirst_no", "maybe_off" -> SlotState.MAYBE to SlotState.OFF
-        else -> SlotState.ON to SlotState.ON
+    internal fun mapHourStatus(status: String): Pair<SlotState, SlotState> {
+        val normalized = status.trim().lowercase().replace('+', '_').replace('/', '_')
+        return when (normalized) {
+            "yes" -> SlotState.ON to SlotState.ON
+            "no" -> SlotState.OFF to SlotState.OFF
+            "first" -> SlotState.OFF to SlotState.ON
+            "mfirst" -> SlotState.MAYBE to SlotState.ON
+            "second" -> SlotState.ON to SlotState.OFF
+            "msecond" -> SlotState.ON to SlotState.MAYBE
+            "maybe" -> SlotState.MAYBE to SlotState.MAYBE
+            "first_msecond", "first_maybe", "no_msecond", "no_maybe", "off_maybe" -> SlotState.OFF to SlotState.MAYBE
+            "mfirst_second", "maybe_second", "mfirst_no", "maybe_no", "maybe_off" -> SlotState.MAYBE to SlotState.OFF
+            else -> SlotState.ON to SlotState.ON
+        }
     }
 
     private fun formatLastUpdated(raw: String, fallbackMillis: Long): String {

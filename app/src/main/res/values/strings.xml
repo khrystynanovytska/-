@@ -81,4 +81,8 @@
     <string name="preset_work">Робота</string>
     <string name="preset_parents">Батьки</string>
     <string name="preset_dacha">Дача</string>
+    <string name="legend_split_off_maybe">Червоно/жовте (30/30)</string>
+    <string name="edit_hour_split_label">Комбіновані 30/30 хв:</string>
+    <string name="split_off_maybe">Нема + можл.</string>
+    <string name="split_maybe_off">Можл. + нема</string>
 </resources>

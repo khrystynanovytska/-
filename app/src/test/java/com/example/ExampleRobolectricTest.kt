@@ -350,4 +350,71 @@ class ExampleRobolectricTest {
 
         assertEquals(Triple(null, "5.2", "Батьки"), upserted)
     }
+
+    @Test
+    fun `main screen supports 1-tap red-yellow and yellow-red 30-30 split presets`() {
+        val nowMillis = 1795420800_000L
+        val today = KyivTime.todayDate(nowMillis)
+        val slots = List(48) { SlotState.ON }
+        val daySchedule = DaySchedule(date = today, slots = slots)
+        val dataset = ScheduleDataset(
+            queueId = "1.2",
+            days = mapOf(today to daySchedule),
+            lastUpdatedLabel = "25.11 07:02",
+            fetchedAtMillis = nowMillis,
+            isFromCache = false
+        )
+        val snapshot = PowerScheduleParser.computeSnapshot(dataset, nowMillis)
+        val splitEdits = mutableListOf<Triple<Int, SlotState, SlotState>>()
+
+        composeTestRule.setContent {
+            SvitloTheme {
+                MainScreen(
+                    uiState = ScheduleUiState(
+                        isLoading = false,
+                        selectedQueue = "1.2",
+                        dataset = dataset,
+                        snapshot = snapshot,
+                        nowMillis = nowMillis
+                    ),
+                    snackbarHostState = SnackbarHostState(),
+                    todayDateLabel = today.formatUkrainianShort(),
+                    tomorrowDateLabel = KyivTime.nextDay(today).formatUkrainianShort(),
+                    onRefresh = {},
+                    onSelectDay = {},
+                    onToggleNotifications = {},
+                    onEditHourSlots = { _, hour, first, second ->
+                        splitEdits.add(Triple(hour, first, second))
+                    }
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("hour_cell_15")
+            .performScrollTo()
+            .performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("edit_hour_off_maybe")
+            .performScrollTo()
+            .performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("hour_cell_16")
+            .performScrollTo()
+            .performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("edit_hour_maybe_off")
+            .performScrollTo()
+            .performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals(
+            listOf(
+                Triple(15, SlotState.OFF, SlotState.MAYBE),
+                Triple(16, SlotState.MAYBE, SlotState.OFF)
+            ),
+            splitEdits
+        )
+    }
 }

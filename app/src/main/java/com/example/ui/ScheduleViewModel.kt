@@ -195,6 +195,12 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
         reapplyMergedDataset(queueId)
     }
 
+    fun setManualHourSlots(date: KyivDate, hour: Int, firstState: SlotState, secondState: SlotState) {
+        val queueId = _uiState.value.selectedQueue
+        prefs.setHourSlotsOverride(queueId, date, hour, firstState, secondState)
+        reapplyMergedDataset(queueId)
+    }
+
     fun setManualSlotState(date: KyivDate, slotIndex: Int, state: SlotState?) {
         val queueId = _uiState.value.selectedQueue
         prefs.setSlotOverride(queueId, date, slotIndex, state)

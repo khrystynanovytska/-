@@ -293,6 +293,14 @@ function setHourOverride(queueId, dKey, hour, slotState) {
   }
 }
 
+function setHourSlotsOverride(queueId, dKey, hour, firstState, secondState) {
+  const key = slotOverrideKey(queueId, dKey);
+  const current = (localStorage.getItem(key) || '.'.repeat(48)).padEnd(48, '.').split('');
+  current[hour * 2] = stateToChar(firstState);
+  current[hour * 2 + 1] = stateToChar(secondState);
+  localStorage.setItem(key, current.join(''));
+}
+
 function getHourOverride(queueId, dKey, hour) {
   const encoded = localStorage.getItem(slotOverrideKey(queueId, dKey));
   if (!encoded || encoded.length <= hour * 2 + 1) return null;
@@ -346,7 +354,8 @@ function findQueueObject(dayQueues, queueId) {
 }
 
 function mapHourStatus(status) {
-  switch (status) {
+  const norm = String(status || '').trim().toLowerCase().replace(/[+/]/g, '_');
+  switch (norm) {
     case 'yes': return ['ON', 'ON'];
     case 'no': return ['OFF', 'OFF'];
     case 'first': return ['OFF', 'ON'];
@@ -357,11 +366,13 @@ function mapHourStatus(status) {
     case 'first_msecond':
     case 'first_maybe':
     case 'no_msecond':
+    case 'no_maybe':
     case 'off_maybe':
       return ['OFF', 'MAYBE'];
     case 'mfirst_second':
     case 'maybe_second':
     case 'mfirst_no':
+    case 'maybe_no':
     case 'maybe_off':
       return ['MAYBE', 'OFF'];
     default: return ['ON', 'ON'];
@@ -876,8 +887,10 @@ function render() {
       for (let hr = 0; hr < 24; hr++) {
         const s1 = activeDay.slots[hr * 2] || 'ON';
         const s2 = activeDay.slots[hr * 2 + 1] || 'ON';
+        const isSplit = s1 !== s2;
+        const isOffMaybePair = (s1 === 'OFF' && s2 === 'MAYBE') || (s1 === 'MAYBE' && s2 === 'OFF');
         const hrBlock = document.createElement('div');
-        hrBlock.className = `t-hour${s1 !== s2 ? ' split' : ''}`;
+        hrBlock.className = `t-hour${isSplit ? ' split' : ''}${isOffMaybePair ? ' split-off-maybe' : ''}`;
 
         const half1 = document.createElement('div');
         half1.className = `t-slot ${s1.toLowerCase()}`;
@@ -923,7 +936,7 @@ function render() {
         btn.setAttribute('aria-label', `Година ${String(hr).padStart(2, '0')}:00`);
 
         const halves = document.createElement('span');
-        halves.className = 'hour-halves';
+        halves.className = `hour-halves${s1 !== s2 ? ' mixed' : ''}`;
         const h1 = document.createElement('span');
         h1.className = `hour-half ${s1.toLowerCase()}`;
         const h2 = document.createElement('span');
@@ -1145,6 +1158,9 @@ function syncHourModalUI() {
   document.querySelectorAll('.hour-option-btn').forEach((btn) => {
     btn.classList.toggle('selected', s1 === s2 && btn.dataset.state === s1);
   });
+  document.querySelectorAll('.hour-split-btn').forEach((btn) => {
+    btn.classList.toggle('selected', btn.dataset.first === s1 && btn.dataset.second === s2);
+  });
   document.querySelectorAll('.half-chip-btn').forEach((btn) => {
     const half = Number(btn.dataset.half);
     const activeState = half === 0 ? s1 : s2;
@@ -1270,6 +1286,15 @@ function wireEvents() {
       if (!state.editingHourTarget) return;
       const { dateKey: dKey, hour } = state.editingHourTarget;
       setHourOverride(state.selectedQueue, dKey, hour, btn.dataset.state);
+      document.getElementById('hour-modal').hidden = true;
+      reapplyLocalDataset();
+    });
+  });
+  document.querySelectorAll('.hour-split-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (!state.editingHourTarget) return;
+      const { dateKey: dKey, hour } = state.editingHourTarget;
+      setHourSlotsOverride(state.selectedQueue, dKey, hour, btn.dataset.first, btn.dataset.second);
       document.getElementById('hour-modal').hidden = true;
       reapplyLocalDataset();
     });

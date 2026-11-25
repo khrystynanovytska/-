@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
 
-  <link rel="stylesheet" href="./styles.css?v=9" />
+  <link rel="stylesheet" href="./styles.css?v=10" />
 </head>
 <body>
   <div class="app-shell">
@@ -189,6 +189,7 @@
               <span class="legend-item"><i class="dot dot-on"></i>Є світло</span>
               <span class="legend-item"><i class="dot dot-maybe"></i>Можливе</span>
               <span class="legend-item"><i class="dot dot-off"></i>Нема світла</span>
+              <span class="legend-item"><i class="dot dot-split-off-maybe"></i>Червоно/жовте (30/30)</span>
               <span class="legend-item" id="legend-now-item"><i class="dot dot-now"></i>Зараз</span>
             </div>
           </div>
@@ -284,18 +285,30 @@
       <h2 class="modal-title" id="hour-modal-title">Година 00:00 – 01:00</h2>
 
       <span class="edit-section-label">Уся година одразу:</span>
-      <div class="hour-options">
+      <div class="hour-whole-row">
         <button type="button" class="hour-option-btn" data-state="ON">
-          <i class="dot dot-on dot-lg"></i>
-          <span>Є світло</span>
+          <i class="dot dot-on"></i>
+          <span>Світло</span>
         </button>
         <button type="button" class="hour-option-btn" data-state="MAYBE">
-          <i class="dot dot-maybe dot-lg"></i>
-          <span>Період можливих відключень</span>
+          <i class="dot dot-maybe"></i>
+          <span>Можл.</span>
         </button>
         <button type="button" class="hour-option-btn" data-state="OFF">
-          <i class="dot dot-off dot-lg"></i>
-          <span>Нема світла (відключення)</span>
+          <i class="dot dot-off"></i>
+          <span>Нема</span>
+        </button>
+      </div>
+
+      <span class="edit-section-label">Комбіновані 30/30 хв:</span>
+      <div class="hour-split-row">
+        <button type="button" class="hour-split-btn" data-first="OFF" data-second="MAYBE">
+          <i class="dot dot-split-off-maybe"></i>
+          <span>Нема + можл.</span>
+        </button>
+        <button type="button" class="hour-split-btn" data-first="MAYBE" data-second="OFF">
+          <i class="dot dot-split-maybe-off"></i>
+          <span>Можл. + нема</span>
         </button>
       </div>
 
@@ -377,6 +390,6 @@
     </div>
   </div>
 
-  <script src="./app.js?v=9"></script>
+  <script src="./app.js?v=10"></script>
 </body>
 </html>

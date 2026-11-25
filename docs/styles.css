@@ -17,6 +17,7 @@
   --maybe-start: #B45309;
   --maybe-end: #D97706;
   --maybe-bright: #F59E0B;
+  --split-yellow: #FACC15;
   --maybe-soft: #FEF3C7;
   --maybe-text: #78350F;
 
@@ -47,7 +48,7 @@
   }
 
   .hour-label.mixed {
-    background: rgba(17, 24, 39, 0.85);
+    background: rgba(17, 24, 39, 0.92);
     color: #F8FAFC;
   }
 }
@@ -623,6 +624,7 @@ body {
 .t-slot.on { background: var(--green-bright); }
 .t-slot.maybe { background: var(--maybe-bright); }
 .t-slot.off { background: var(--red-bright); }
+.t-hour.split-off-maybe .t-slot.maybe { background: var(--split-yellow); }
 
 .now-marker {
   position: absolute;
@@ -709,10 +711,13 @@ body {
 .hour-half.maybe { background: var(--maybe-soft); }
 .hour-half.off { background: var(--red-soft); }
 
+.hour-halves.mixed .hour-half.on { background: var(--green-bright); }
+.hour-halves.mixed .hour-half.maybe { background: var(--split-yellow); }
+.hour-halves.mixed .hour-half.off { background: var(--red-bright); }
+
 .hour-divider-mid {
-  width: 1px;
-  background: var(--outline);
-  opacity: 0.85;
+  width: 1.5px;
+  background: rgba(0, 0, 0, 0.25);
   flex-shrink: 0;
 }
 
@@ -725,11 +730,13 @@ body {
 .hour-label.maybe { color: var(--maybe-text); }
 .hour-label.off { color: var(--red-text); }
 .hour-label.mixed {
-  background: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.92);
   color: #0F172A;
-  padding: 2px 5px;
+  font-size: 11px;
+  padding: 1px 4px;
   border-radius: 6px;
   font-weight: 700;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14);
 }
 
 .legend-row {
@@ -759,6 +766,16 @@ body {
 .dot-on { background: var(--green-bright); }
 .dot-maybe { background: var(--maybe-bright); }
 .dot-off { background: var(--red-bright); }
+.dot-split-off-maybe {
+  width: 11px;
+  height: 11px;
+  background: linear-gradient(90deg, var(--red-bright) 50%, var(--split-yellow) 50%);
+}
+.dot-split-maybe-off {
+  width: 11px;
+  height: 11px;
+  background: linear-gradient(90deg, var(--split-yellow) 50%, var(--red-bright) 50%);
+}
 .dot-now { background: var(--on-bg); }
 
 /* Intervals Card */
@@ -1089,35 +1106,44 @@ body {
   color: var(--on-muted);
 }
 
-.hour-options {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.hour-whole-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
 }
 
-.hour-option-btn {
-  height: 48px;
-  border-radius: 14px;
+.hour-split-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.hour-option-btn,
+.hour-split-btn {
+  min-height: 48px;
+  border-radius: 12px;
   border: 1.5px solid transparent;
   background: var(--surface-variant);
   color: var(--on-surface);
-  padding: 0 14px;
-  display: flex;
+  padding: 0 8px;
+  display: inline-flex;
   align-items: center;
-  gap: 12px;
+  justify-content: center;
+  gap: 6px;
   font-family: inherit;
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
-  text-align: left;
 }
 
 .hour-option-btn.selected,
+.hour-split-btn.selected,
 .half-chip-btn.selected {
   border-color: var(--primary);
   box-shadow: inset 0 0 0 1px var(--primary);
   background: var(--green-soft);
   color: var(--green-text);
+  font-weight: 700;
 }
 
 .half-slot-group {

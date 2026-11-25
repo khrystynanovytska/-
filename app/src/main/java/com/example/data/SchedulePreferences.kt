@@ -124,6 +124,23 @@ class SchedulePreferences(context: Context) {
         }
     }
 
+    fun setHourSlotsOverride(
+        queueId: String,
+        date: KyivDate,
+        hour: Int,
+        firstState: SlotState,
+        secondState: SlotState
+    ) {
+        val key = slotOverridesKey(queueId, date)
+        val current = prefs.getString(key, null)?.padEnd(48, '.')?.toCharArray()
+            ?: CharArray(48) { '.' }
+        val idx1 = (hour * 2).coerceIn(0, 47)
+        val idx2 = (hour * 2 + 1).coerceIn(0, 47)
+        current[idx1] = slotStateToChar(firstState)
+        current[idx2] = slotStateToChar(secondState)
+        prefs.edit().putString(key, String(current)).apply()
+    }
+
     fun getHourOverride(queueId: String, date: KyivDate, hour: Int): SlotState? {
         val encoded = prefs.getString(slotOverridesKey(queueId, date), null) ?: return null
         val idx1 = (hour * 2).coerceIn(0, encoded.lastIndex)

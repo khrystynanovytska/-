@@ -322,4 +322,46 @@ class PowerScheduleParserTest {
         // Cannot delete the last remaining profile
         assertNull(prefs.deleteProfile(home.id))
     }
+
+    @Test
+    fun `parses compound delimiter status codes and saves atomic 30-30 split hour overrides`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = SchedulePreferences(context)
+        val date = KyivDate(2026, 11, 25)
+        val midnightEpochSec = KyivTime.epochMillisFor(date, 0) / 1000L
+        prefs.clearDaySlotOverrides("3.1", date)
+
+        assertEquals(SlotState.OFF to SlotState.MAYBE, PowerScheduleParser.mapHourStatus("no+maybe"))
+        assertEquals(SlotState.MAYBE to SlotState.OFF, PowerScheduleParser.mapHourStatus("maybe/no"))
+
+        val json = """
+            {
+              "fact": {
+                "data": {
+                  "$midnightEpochSec": {
+                    "GPV3.1": {
+                      "16": "yes",
+                      "17": "yes"
+                    }
+                  }
+                }
+              }
+            }
+        """.trimIndent()
+
+        val parsed = PowerScheduleParser.parseJson(json, queueId = "3.1")
+        // Hour 15 (15:00-16:00) -> Red/Yellow (OFF + MAYBE); Hour 16 (16:00-17:00) -> Yellow/Red (MAYBE + OFF)
+        prefs.setHourSlotsOverride("3.1", date, 15, SlotState.OFF, SlotState.MAYBE)
+        prefs.setHourSlotsOverride("3.1", date, 16, SlotState.MAYBE, SlotState.OFF)
+
+        val merged = prefs.applyManualSlotOverrides(parsed)
+        val mergedDay = merged.days[date]!!
+        assertTrue(mergedDay.hasManualEdits)
+        assertEquals(SlotState.OFF, mergedDay.slots[30])
+        assertEquals(SlotState.MAYBE, mergedDay.slots[31])
+        assertEquals(SlotState.MAYBE, mergedDay.slots[32])
+        assertEquals(SlotState.OFF, mergedDay.slots[33])
+
+        prefs.clearDaySlotOverrides("3.1", date)
+    }
 }

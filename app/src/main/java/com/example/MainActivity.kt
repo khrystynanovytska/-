@@ -95,6 +95,9 @@ class MainActivity : ComponentActivity() {
                     onEditHourState = { date, hour, state ->
                         viewModel.setManualHourState(date, hour, state)
                     },
+                    onEditHourSlots = { date, hour, first, second ->
+                        viewModel.setManualHourSlots(date, hour, first, second)
+                    },
                     onEditSlotState = { date, slotIndex, state ->
                         viewModel.setManualSlotState(date, slotIndex, state)
                     },

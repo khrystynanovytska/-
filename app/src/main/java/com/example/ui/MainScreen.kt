@@ -115,6 +115,7 @@ import com.example.ui.theme.PowerOnGreenEnd
 import com.example.ui.theme.PowerOnGreenSoftDark
 import com.example.ui.theme.PowerOnGreenSoftLight
 import com.example.ui.theme.PowerOnGreenStart
+import com.example.ui.theme.PowerSplitYellow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -132,6 +133,7 @@ fun MainScreen(
     onDeleteProfile: (String) -> Unit = {},
     onSetManualLiveStatus: (SlotState?) -> Unit = {},
     onEditHourState: (KyivDate, Int, SlotState?) -> Unit = { _, _, _ -> },
+    onEditHourSlots: (KyivDate, Int, SlotState, SlotState) -> Unit = { _, _, _, _ -> },
     onEditSlotState: (KyivDate, Int, SlotState?) -> Unit = { _, _, _ -> },
     onClearManualDayEdits: (KyivDate) -> Unit = {},
     isHourManuallyEdited: (KyivDate, Int) -> Boolean = { _, _ -> false }
@@ -310,6 +312,10 @@ fun MainScreen(
             onSelectWholeHour = { chosenState ->
                 editingHourTarget = null
                 onEditHourState(date, hour, chosenState)
+            },
+            onSelectSplitHour = { first, second ->
+                editingHourTarget = null
+                onEditHourSlots(date, hour, first, second)
             },
             onSelectHalfSlot = { slotOffset, chosenState ->
                 onEditSlotState(date, hour * 2 + slotOffset, chosenState)
@@ -853,6 +859,11 @@ private fun DailyScheduleCard(
                         color = PowerOffRedBright,
                         label = stringResource(R.string.legend_off)
                     )
+                    SplitLegendDot(
+                        leftColor = PowerOffRedBright,
+                        rightColor = PowerSplitYellow,
+                        label = stringResource(R.string.legend_split_off_maybe)
+                    )
                     if (!isViewingTomorrow) {
                         LegendDot(
                             color = MaterialTheme.colorScheme.onSurface,
@@ -947,9 +958,9 @@ private fun Timeline24hBar(
                 )
             }
 
-            fun colorFor(state: SlotState) = when (state) {
+            fun colorFor(state: SlotState, isOffMaybePair: Boolean) = when (state) {
                 SlotState.ON -> PowerOnGreenBright
-                SlotState.MAYBE -> AmberWarning
+                SlotState.MAYBE -> if (isOffMaybePair) PowerSplitYellow else AmberWarning
                 SlotState.OFF -> PowerOffRedBright
             }
 
@@ -960,14 +971,16 @@ private fun Timeline24hBar(
                     val halfWidth = blockWidth / 2f
                     val firstHalf = slots.getOrElse(h * 2) { SlotState.ON }
                     val secondHalf = slots.getOrElse(h * 2 + 1) { SlotState.ON }
+                    val isOffMaybePair = (firstHalf == SlotState.OFF && secondHalf == SlotState.MAYBE) ||
+                        (firstHalf == SlotState.MAYBE && secondHalf == SlotState.OFF)
 
                     drawRect(
-                        color = colorFor(firstHalf),
+                        color = colorFor(firstHalf, isOffMaybePair),
                         topLeft = Offset(x, topY),
                         size = Size(halfWidth, barHeight)
                     )
                     drawRect(
-                        color = colorFor(secondHalf),
+                        color = colorFor(secondHalf, isOffMaybePair),
                         topLeft = Offset(x + halfWidth, topY),
                         size = Size(blockWidth - halfWidth, barHeight)
                     )
@@ -1033,6 +1046,12 @@ private fun HourlyMatrixGrid(
         SlotState.OFF -> offBg
     }
 
+    fun splitBgFor(state: SlotState) = when (state) {
+        SlotState.ON -> PowerOnGreenBright
+        SlotState.MAYBE -> PowerSplitYellow
+        SlotState.OFF -> PowerOffRedBright
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         for (rowIdx in 0 until 6) {
             Row(
@@ -1059,7 +1078,7 @@ private fun HourlyMatrixGrid(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .height(38.dp)
+                            .height(40.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .clickable { onHourClick(hour) }
                             .then(
@@ -1081,21 +1100,21 @@ private fun HourlyMatrixGrid(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxSize()
-                                    .background(bgFor(firstHalf))
+                                    .background(if (bothSame) bgFor(firstHalf) else splitBgFor(firstHalf))
                             )
                             if (!bothSame) {
                                 Box(
                                     modifier = Modifier
-                                        .width(1.dp)
+                                        .width(1.5.dp)
                                         .fillMaxHeight()
-                                        .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.7f))
+                                        .background(Color.Black.copy(alpha = 0.25f))
                                 )
                             }
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxSize()
-                                    .background(bgFor(secondHalf))
+                                    .background(if (bothSame) bgFor(secondHalf) else splitBgFor(secondHalf))
                             )
                         }
 
@@ -1110,17 +1129,18 @@ private fun HourlyMatrixGrid(
                             )
                         } else {
                             Surface(
-                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
-                                shape = RoundedCornerShape(6.dp)
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                                shape = RoundedCornerShape(6.dp),
+                                shadowElevation = 1.dp
                             ) {
                                 Text(
                                     text = String.format("%02d:00", hour),
-                                    style = MaterialTheme.typography.labelMedium.copy(
+                                    style = MaterialTheme.typography.labelSmall.copy(
                                         fontFamily = JetBrainsMonoFontFamily,
-                                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.SemiBold
+                                        fontWeight = FontWeight.Bold
                                     ),
                                     color = labelColor,
-                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                                 )
                             }
                         }
@@ -1147,6 +1167,43 @@ private fun LegendDot(color: Color, label: String) {
             text = label,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun SplitLegendDot(leftColor: Color, rightColor: Color, label: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        SplitCircleDot(leftColor = leftColor, rightColor = rightColor, sizeDp = 11)
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun SplitCircleDot(leftColor: Color, rightColor: Color, sizeDp: Int) {
+    Row(
+        modifier = Modifier
+            .size(sizeDp.dp)
+            .clip(CircleShape)
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .background(leftColor)
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .background(rightColor)
         )
     }
 }
@@ -1348,6 +1405,7 @@ private fun EditHourDialog(
     hasManualOverride: Boolean,
     onDismiss: () -> Unit,
     onSelectWholeHour: (SlotState?) -> Unit,
+    onSelectSplitHour: (SlotState, SlotState) -> Unit,
     onSelectHalfSlot: (Int, SlotState) -> Unit
 ) {
     val rangeTitle = String.format("%02d:00 – %02d:00", hour, hour + 1)
@@ -1416,6 +1474,76 @@ private fun EditHourDialog(
                                         .background(dotColor)
                                 )
                                 Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Text(
+                    text = stringResource(R.string.edit_hour_split_label),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(
+                        Triple(
+                            SlotState.OFF to SlotState.MAYBE,
+                            PowerOffRedBright to PowerSplitYellow,
+                            stringResource(R.string.split_off_maybe) to "edit_hour_off_maybe"
+                        ),
+                        Triple(
+                            SlotState.MAYBE to SlotState.OFF,
+                            PowerSplitYellow to PowerOffRedBright,
+                            stringResource(R.string.split_maybe_off) to "edit_hour_maybe_off"
+                        )
+                    ).forEach { (pair, colors, labelAndTag) ->
+                        val (firstTarget, secondTarget) = pair
+                        val (leftColor, rightColor) = colors
+                        val (label, tag) = labelAndTag
+                        val isSelected = firstHalfState == firstTarget && secondHalfState == secondTarget
+                        Surface(
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            border = if (isSelected) {
+                                BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+                            } else {
+                                null
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onSelectSplitHour(firstTarget, secondTarget) }
+                                .testTag(tag)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                SplitCircleDot(
+                                    leftColor = leftColor,
+                                    rightColor = rightColor,
+                                    sizeDp = 12
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = label,
                                     style = MaterialTheme.typography.labelMedium.copy(
