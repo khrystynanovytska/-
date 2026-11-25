@@ -20,7 +20,9 @@ const KEYS = {
   QUEUE: 'svitlo31_queue',
   ADDRESS: 'svitlo31_address',
   MANUAL_LIVE: 'svitlo31_manual_live',
-  MANUAL_EXPIRES: 'svitlo31_manual_expires'
+  MANUAL_EXPIRES: 'svitlo31_manual_expires',
+  SAVED_PROFILES: 'svitlo31_saved_profiles',
+  ACTIVE_PROFILE_ID: 'svitlo31_active_profile_id'
 };
 
 const UK_MONTHS = [
@@ -28,15 +30,108 @@ const UK_MONTHS = [
   'лип.', 'серп.', 'вер.', 'жовт.', 'лист.', 'груд.'
 ];
 
+function getSavedProfiles() {
+  const raw = localStorage.getItem(KEYS.SAVED_PROFILES);
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const clean = parsed
+          .filter((p) => p && typeof p.id === 'string' && typeof p.queueId === 'string')
+          .map((p) => ({
+            id: p.id.trim(),
+            queueId: p.queueId.trim(),
+            label: String(p.label || '').trim()
+          }))
+          .filter((p) => p.id && p.queueId);
+        if (clean.length > 0) return clean;
+      }
+    } catch {
+      // fall through to migration
+    }
+  }
+  const initialQueue = localStorage.getItem(KEYS.QUEUE) || DEFAULT_QUEUE;
+  const storedAddr = localStorage.getItem(KEYS.ADDRESS);
+  const initialLabel = storedAddr !== null ? storedAddr : DEFAULT_ADDRESS;
+  const initial = [{ id: 'profile_default', queueId: initialQueue, label: initialLabel }];
+  localStorage.setItem(KEYS.SAVED_PROFILES, JSON.stringify(initial));
+  localStorage.setItem(KEYS.ACTIVE_PROFILE_ID, 'profile_default');
+  return initial;
+}
+
+function persistSavedProfiles(profiles) {
+  localStorage.setItem(KEYS.SAVED_PROFILES, JSON.stringify(profiles));
+}
+
+function getActiveProfile() {
+  const profiles = getSavedProfiles();
+  const activeId = localStorage.getItem(KEYS.ACTIVE_PROFILE_ID);
+  return profiles.find((p) => p.id === activeId) || profiles[0];
+}
+
+function selectSavedProfile(profileId) {
+  const profiles = getSavedProfiles();
+  const target = profiles.find((p) => p.id === profileId);
+  if (!target) return null;
+  localStorage.setItem(KEYS.ACTIVE_PROFILE_ID, target.id);
+  localStorage.setItem(KEYS.QUEUE, target.queueId);
+  localStorage.setItem(KEYS.ADDRESS, target.label);
+  return target;
+}
+
+function saveQueueProfile(profileId, queueId, label) {
+  const profiles = getSavedProfiles();
+  const cleanQueue = String(queueId || DEFAULT_QUEUE).trim();
+  const cleanLabel = String(label || '').trim();
+  const idx = profileId ? profiles.findIndex((p) => p.id === profileId) : -1;
+  let saved;
+  if (idx >= 0) {
+    saved = { ...profiles[idx], queueId: cleanQueue, label: cleanLabel };
+    profiles[idx] = saved;
+  } else {
+    saved = {
+      id: `p_${Date.now()}_${profiles.length + 1}`,
+      queueId: cleanQueue,
+      label: cleanLabel
+    };
+    profiles.push(saved);
+  }
+  persistSavedProfiles(profiles);
+  localStorage.setItem(KEYS.ACTIVE_PROFILE_ID, saved.id);
+  localStorage.setItem(KEYS.QUEUE, saved.queueId);
+  localStorage.setItem(KEYS.ADDRESS, saved.label);
+  return saved;
+}
+
+function deleteSavedProfile(profileId) {
+  const profiles = getSavedProfiles();
+  if (profiles.length <= 1) return null;
+  const nextList = profiles.filter((p) => p.id !== profileId);
+  if (nextList.length === profiles.length || nextList.length === 0) return null;
+  persistSavedProfiles(nextList);
+  const currentActiveId = localStorage.getItem(KEYS.ACTIVE_PROFILE_ID);
+  const nextActive = nextList.find((p) => p.id === currentActiveId) || nextList[0];
+  localStorage.setItem(KEYS.ACTIVE_PROFILE_ID, nextActive.id);
+  localStorage.setItem(KEYS.QUEUE, nextActive.queueId);
+  localStorage.setItem(KEYS.ADDRESS, nextActive.label);
+  return nextActive;
+}
+
+const initialProfilesList = getSavedProfiles();
+const initialActiveProfile = getActiveProfile();
+
 // --- State ---
 const state = {
-  selectedQueue: localStorage.getItem(KEYS.QUEUE) || DEFAULT_QUEUE,
-  addressLabel: localStorage.getItem(KEYS.ADDRESS) ?? DEFAULT_ADDRESS,
+  savedProfiles: initialProfilesList,
+  activeProfileId: initialActiveProfile.id,
+  selectedQueue: initialActiveProfile.queueId,
+  addressLabel: initialActiveProfile.label,
   selectedTomorrow: false,
   dataset: null,
   isLoading: true,
   error: null,
-  pickedQueueDraft: DEFAULT_QUEUE,
+  pickedQueueDraft: initialActiveProfile.queueId,
+  editingProfileIdDraft: initialActiveProfile.id,
   editingHourTarget: null,
   deferredInstallPrompt: null
 };
@@ -171,6 +266,19 @@ function stateToChar(st) {
   return '.';
 }
 
+function setSlotOverride(queueId, dKey, slotIdx, slotState) {
+  const key = slotOverrideKey(queueId, dKey);
+  const current = (localStorage.getItem(key) || '.'.repeat(48)).padEnd(48, '.').split('');
+  const safeIdx = Math.max(0, Math.min(47, slotIdx));
+  current[safeIdx] = stateToChar(slotState);
+  const encoded = current.join('');
+  if (/^\.+$/.test(encoded)) {
+    localStorage.removeItem(key);
+  } else {
+    localStorage.setItem(key, encoded);
+  }
+}
+
 function setHourOverride(queueId, dKey, hour, slotState) {
   const key = slotOverrideKey(queueId, dKey);
   const current = (localStorage.getItem(key) || '.'.repeat(48)).padEnd(48, '.').split('');
@@ -187,8 +295,8 @@ function setHourOverride(queueId, dKey, hour, slotState) {
 
 function getHourOverride(queueId, dKey, hour) {
   const encoded = localStorage.getItem(slotOverrideKey(queueId, dKey));
-  if (!encoded || encoded.length <= hour * 2) return null;
-  return charToState(encoded[hour * 2]);
+  if (!encoded || encoded.length <= hour * 2 + 1) return null;
+  return charToState(encoded[hour * 2]) || charToState(encoded[hour * 2 + 1]);
 }
 
 function clearDaySlotOverrides(queueId, dKey) {
@@ -246,6 +354,16 @@ function mapHourStatus(status) {
     case 'second': return ['ON', 'OFF'];
     case 'msecond': return ['ON', 'MAYBE'];
     case 'maybe': return ['MAYBE', 'MAYBE'];
+    case 'first_msecond':
+    case 'first_maybe':
+    case 'no_msecond':
+    case 'off_maybe':
+      return ['OFF', 'MAYBE'];
+    case 'mfirst_second':
+    case 'maybe_second':
+    case 'mfirst_no':
+    case 'maybe_off':
+      return ['MAYBE', 'OFF'];
     default: return ['ON', 'ON'];
   }
 }
@@ -568,11 +686,49 @@ async function fetchSchedule() {
 }
 
 // --- Rendering ---
+function renderSavedQueuesStrip() {
+  const strip = document.getElementById('saved-queues-strip');
+  if (!strip) return;
+  const profiles = state.savedProfiles || [];
+  const key = `${state.activeProfileId}|${profiles.map((p) => `${p.id}:${p.queueId}:${p.label}`).join(',')}`;
+  if (strip.dataset.renderKey === key) return;
+  strip.dataset.renderKey = key;
+  strip.innerHTML = '';
+
+  for (const p of profiles) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `saved-queue-chip${p.id === state.activeProfileId ? ' active' : ''}`;
+    if (p.label) {
+      const lbl = document.createElement('span');
+      lbl.className = 'saved-queue-label';
+      lbl.textContent = p.label;
+      const num = document.createElement('span');
+      num.className = 'saved-queue-num';
+      num.textContent = `· ${p.queueId}`;
+      btn.appendChild(lbl);
+      btn.appendChild(num);
+    } else {
+      btn.textContent = `Черга ${p.queueId}`;
+    }
+    btn.addEventListener('click', () => activateProfile(p.id));
+    strip.appendChild(btn);
+  }
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'saved-queue-chip-add';
+  addBtn.textContent = '+ Додати місце';
+  addBtn.addEventListener('click', () => openQueueModal(true));
+  strip.appendChild(addBtn);
+}
+
 function render() {
   document.getElementById('queue-title-text').textContent = `Черга ${state.selectedQueue}`;
   const addrEl = document.getElementById('address-label-text');
   addrEl.textContent = state.addressLabel;
   addrEl.hidden = !state.addressLabel.trim();
+  renderSavedQueuesStrip();
 
   const loadingCard = document.getElementById('loading-card');
   const errorCard = document.getElementById('error-card');
@@ -652,7 +808,9 @@ function render() {
         nextLabelEl.textContent = snap.nextChangeTargetState === 'ON'
           ? `Увімкнення о ${snap.nextChangeTimeLabel}`
           : (snap.nextChangeTargetState === 'MAYBE'
-            ? `Можливе вимкнення о ${snap.nextChangeTimeLabel}`
+            ? (snap.effectiveState === 'ON'
+              ? `Можливе вимкнення о ${snap.nextChangeTimeLabel}`
+              : `Можливі відключення з ${snap.nextChangeTimeLabel}`)
             : `Вимкнення о ${snap.nextChangeTimeLabel}`);
       } else {
         nextLabelEl.hidden = true;
@@ -709,17 +867,26 @@ function render() {
     dayMissing.hidden = true;
     dayBody.hidden = false;
 
-    // 24h bar
+    // 24h bar grouped by 24 hour blocks (0px gap at :30, crisp boundary between hours)
     const timelineKey = `${activeDay.dateKey}:${activeDay.slots.join(',')}`;
     const timelineSlots = document.getElementById('timeline-slots');
     if (timelineSlots.dataset.renderKey !== timelineKey) {
       timelineSlots.dataset.renderKey = timelineKey;
       timelineSlots.innerHTML = '';
-      for (let i = 0; i < 48; i++) {
-        const div = document.createElement('div');
-        const st = activeDay.slots[i] || 'ON';
-        div.className = `t-slot ${st.toLowerCase()}`;
-        timelineSlots.appendChild(div);
+      for (let hr = 0; hr < 24; hr++) {
+        const s1 = activeDay.slots[hr * 2] || 'ON';
+        const s2 = activeDay.slots[hr * 2 + 1] || 'ON';
+        const hrBlock = document.createElement('div');
+        hrBlock.className = `t-hour${s1 !== s2 ? ' split' : ''}`;
+
+        const half1 = document.createElement('div');
+        half1.className = `t-slot ${s1.toLowerCase()}`;
+        const half2 = document.createElement('div');
+        half2.className = `t-slot ${s2.toLowerCase()}`;
+
+        hrBlock.appendChild(half1);
+        hrBlock.appendChild(half2);
+        timelineSlots.appendChild(hrBlock);
       }
     }
 
@@ -762,6 +929,11 @@ function render() {
         const h2 = document.createElement('span');
         h2.className = `hour-half ${s2.toLowerCase()}`;
         halves.appendChild(h1);
+        if (s1 !== s2) {
+          const midDiv = document.createElement('span');
+          midDiv.className = 'hour-divider-mid';
+          halves.appendChild(midDiv);
+        }
         halves.appendChild(h2);
 
         const lbl = document.createElement('span');
@@ -823,10 +995,126 @@ function render() {
 }
 
 // --- Modals & Actions ---
-function openQueueModal() {
-  state.pickedQueueDraft = state.selectedQueue;
-  document.getElementById('input-address').value = state.addressLabel;
+function activateProfile(profileId) {
+  const target = selectSavedProfile(profileId);
+  if (!target) return;
+  state.savedProfiles = getSavedProfiles();
+  state.activeProfileId = target.id;
+  state.selectedQueue = target.queueId;
+  state.addressLabel = target.label;
+  setManualLive(null, 0);
+  const reparsed = getCachedDataset(state.selectedQueue);
+  if (reparsed) {
+    state.dataset = reparsed;
+    render();
+  } else {
+    render();
+    fetchSchedule();
+  }
+}
+
+function syncPresetChipsUI() {
+  const val = (document.getElementById('input-address').value || '').trim().toLowerCase();
+  document.querySelectorAll('.preset-chip').forEach((chip) => {
+    chip.classList.toggle('selected', (chip.dataset.preset || '').toLowerCase() === val);
+  });
+}
+
+function syncQueueModalModeUI() {
+  const isAdding = !state.editingProfileIdDraft;
+  document.getElementById('queue-form-title').textContent = isAdding
+    ? 'Нова черга / місце'
+    : 'Редагувати місце';
+  document.getElementById('btn-save-queue').textContent = isAdding ? 'Додати чергу' : 'Застосувати';
+  document.getElementById('btn-new-profile-mode').hidden = isAdding;
+  syncPresetChipsUI();
+}
+
+function renderSavedProfilesList() {
+  const listEl = document.getElementById('saved-profiles-list');
+  if (!listEl) return;
+  const profiles = state.savedProfiles || [];
+  listEl.innerHTML = '';
+
+  for (const p of profiles) {
+    const row = document.createElement('div');
+    const isActive = p.id === state.activeProfileId;
+    const isEditing = p.id === state.editingProfileIdDraft;
+    row.className = `saved-profile-row${isEditing || isActive ? ' active' : ''}`;
+
+    const infoBtn = document.createElement('button');
+    infoBtn.type = 'button';
+    infoBtn.className = 'saved-profile-info';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'saved-profile-name';
+    nameSpan.textContent = p.label || `Черга ${p.queueId}`;
+
+    const subSpan = document.createElement('span');
+    subSpan.className = 'saved-profile-sub';
+    subSpan.textContent = `Черга ${p.queueId}${isActive ? ' · активна' : ''}`;
+
+    infoBtn.appendChild(nameSpan);
+    infoBtn.appendChild(subSpan);
+    infoBtn.addEventListener('click', () => {
+      state.editingProfileIdDraft = p.id;
+      state.pickedQueueDraft = p.queueId;
+      document.getElementById('input-address').value = p.label;
+      activateProfile(p.id);
+      renderSavedProfilesList();
+      renderQueueGrid();
+      syncQueueModalModeUI();
+    });
+    row.appendChild(infoBtn);
+
+    if (profiles.length > 1) {
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'saved-profile-delete';
+      delBtn.setAttribute('aria-label', 'Видалити чергу');
+      delBtn.textContent = '✕';
+      delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const nextActive = deleteSavedProfile(p.id);
+        if (!nextActive) return;
+        state.savedProfiles = getSavedProfiles();
+        state.activeProfileId = nextActive.id;
+        state.selectedQueue = nextActive.queueId;
+        state.addressLabel = nextActive.label;
+        if (state.editingProfileIdDraft === p.id) {
+          state.editingProfileIdDraft = nextActive.id;
+          state.pickedQueueDraft = nextActive.queueId;
+          document.getElementById('input-address').value = nextActive.label;
+        }
+        setManualLive(null, 0);
+        const reparsed = getCachedDataset(state.selectedQueue);
+        if (reparsed) state.dataset = reparsed;
+        render();
+        renderSavedProfilesList();
+        renderQueueGrid();
+        syncQueueModalModeUI();
+      });
+      row.appendChild(delBtn);
+    }
+
+    listEl.appendChild(row);
+  }
+}
+
+function openQueueModal(startInAddMode = false) {
+  state.savedProfiles = getSavedProfiles();
+  if (startInAddMode) {
+    state.editingProfileIdDraft = null;
+    state.pickedQueueDraft = state.selectedQueue;
+    document.getElementById('input-address').value = '';
+  } else {
+    state.editingProfileIdDraft = state.activeProfileId;
+    state.pickedQueueDraft = state.selectedQueue;
+    document.getElementById('input-address').value = state.addressLabel;
+  }
+  renderSavedProfilesList();
   renderQueueGrid();
+  syncQueueModalModeUI();
   document.getElementById('queue-modal').hidden = false;
 }
 
@@ -840,12 +1128,6 @@ function renderQueueGrid() {
     btn.className = `queue-option${q === state.pickedQueueDraft ? ' selected' : ''}`;
     btn.textContent = q;
     btn.addEventListener('click', () => {
-      const addrInput = document.getElementById('input-address');
-      if (q !== '3.1' && addrInput.value === DEFAULT_ADDRESS) {
-        addrInput.value = '';
-      } else if (q === '3.1' && !addrInput.value.trim()) {
-        addrInput.value = DEFAULT_ADDRESS;
-      }
       state.pickedQueueDraft = q;
       renderQueueGrid();
     });
@@ -853,12 +1135,33 @@ function renderQueueGrid() {
   }
 }
 
-function openHourModal(dKey, hr) {
-  state.editingHourTarget = { dateKey: dKey, hour: hr };
-  const rangeStr = `${String(hr).padStart(2, '0')}:00 – ${String(hr + 1).padStart(2, '0')}:00`;
-  document.getElementById('hour-modal-title').textContent = `Година ${rangeStr}`;
+function syncHourModalUI() {
+  if (!state.editingHourTarget || !state.dataset) return;
+  const { dateKey: dKey, hour: hr } = state.editingHourTarget;
+  const day = state.dataset.days[dKey];
+  const s1 = (day && day.slots[hr * 2]) || 'ON';
+  const s2 = (day && day.slots[hr * 2 + 1]) || 'ON';
+
+  document.querySelectorAll('.hour-option-btn').forEach((btn) => {
+    btn.classList.toggle('selected', s1 === s2 && btn.dataset.state === s1);
+  });
+  document.querySelectorAll('.half-chip-btn').forEach((btn) => {
+    const half = Number(btn.dataset.half);
+    const activeState = half === 0 ? s1 : s2;
+    btn.classList.toggle('selected', btn.dataset.state === activeState);
+  });
   const hasOverride = !!getHourOverride(state.selectedQueue, dKey, hr);
   document.getElementById('btn-reset-hour').hidden = !hasOverride;
+}
+
+function openHourModal(dKey, hr) {
+  state.editingHourTarget = { dateKey: dKey, hour: hr };
+  const h0 = String(hr).padStart(2, '0');
+  const h1 = String(hr + 1).padStart(2, '0');
+  document.getElementById('hour-modal-title').textContent = `Година ${h0}:00 – ${h1}:00`;
+  document.getElementById('half-first-label').textContent = `${h0}:00 – ${h0}:30`;
+  document.getElementById('half-second-label').textContent = `${h0}:30 – ${h1}:00`;
+  syncHourModalUI();
   document.getElementById('hour-modal').hidden = false;
 }
 
@@ -913,7 +1216,20 @@ function wireEvents() {
   });
 
   // Queue modal
-  document.getElementById('btn-open-queue').addEventListener('click', openQueueModal);
+  document.getElementById('btn-open-queue').addEventListener('click', () => openQueueModal(false));
+  document.getElementById('btn-new-profile-mode').addEventListener('click', () => {
+    state.editingProfileIdDraft = null;
+    document.getElementById('input-address').value = '';
+    renderSavedProfilesList();
+    syncQueueModalModeUI();
+  });
+  document.querySelectorAll('.preset-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      document.getElementById('input-address').value = chip.dataset.preset || '';
+      syncPresetChipsUI();
+    });
+  });
+  document.getElementById('input-address').addEventListener('input', syncPresetChipsUI);
   document.getElementById('btn-cancel-queue').addEventListener('click', () => {
     document.getElementById('queue-modal').hidden = true;
   });
@@ -922,17 +1238,22 @@ function wireEvents() {
   });
   document.getElementById('btn-save-queue').addEventListener('click', () => {
     const newAddr = document.getElementById('input-address').value.trim();
-    state.selectedQueue = state.pickedQueueDraft;
-    state.addressLabel = newAddr;
-    localStorage.setItem(KEYS.QUEUE, state.selectedQueue);
-    localStorage.setItem(KEYS.ADDRESS, state.addressLabel);
-    setManualLive(null, 0);
+    const prevQueue = state.selectedQueue;
+    const saved = saveQueueProfile(state.editingProfileIdDraft, state.pickedQueueDraft, newAddr);
+    state.savedProfiles = getSavedProfiles();
+    state.activeProfileId = saved.id;
+    state.selectedQueue = saved.queueId;
+    state.addressLabel = saved.label;
+    if (prevQueue !== saved.queueId || !state.editingProfileIdDraft) {
+      setManualLive(null, 0);
+    }
     document.getElementById('queue-modal').hidden = true;
     const reparsed = getCachedDataset(state.selectedQueue);
     if (reparsed) {
       state.dataset = reparsed;
       render();
     } else {
+      render();
       fetchSchedule();
     }
   });
@@ -953,6 +1274,16 @@ function wireEvents() {
       reapplyLocalDataset();
     });
   });
+  document.querySelectorAll('.half-chip-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (!state.editingHourTarget) return;
+      const { dateKey: dKey, hour } = state.editingHourTarget;
+      const half = Number(btn.dataset.half);
+      setSlotOverride(state.selectedQueue, dKey, hour * 2 + half, btn.dataset.state);
+      reapplyLocalDataset();
+      syncHourModalUI();
+    });
+  });
   document.getElementById('btn-reset-hour').addEventListener('click', () => {
     if (!state.editingHourTarget) return;
     const { dateKey: dKey, hour } = state.editingHourTarget;
@@ -964,7 +1295,7 @@ function wireEvents() {
   // PWA Install Prompt (Chromium + Apple Safari)
   function isStandaloneInstalled() {
     return window.matchMedia('(display-mode: standalone)').matches ||
-      window.navigator.standalone === true;
+      (typeof navigator !== 'undefined' && navigator.standalone === true);
   }
 
   function isAppleMobileDevice() {

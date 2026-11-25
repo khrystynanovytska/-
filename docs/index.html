@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
 
-  <link rel="stylesheet" href="./styles.css?v=7" />
+  <link rel="stylesheet" href="./styles.css?v=9" />
 </head>
 <body>
   <div class="app-shell">
@@ -53,6 +53,9 @@
         </button>
       </div>
     </header>
+
+    <!-- Saved Labeled Queues Quick Strip -->
+    <nav class="saved-queues-strip" id="saved-queues-strip" aria-label="Збережені черги та місця"></nav>
 
     <!-- Install prompt banner (Chrome 1-tap + Apple Safari instruction modal) -->
     <section class="install-banner" id="install-banner" hidden>
@@ -238,12 +241,29 @@
   <div class="modal-backdrop" id="queue-modal" hidden>
     <div class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="queue-modal-title">
       <div class="modal-handle"></div>
-      <h2 class="modal-title" id="queue-modal-title">Оберіть чергу</h2>
+      <h2 class="modal-title" id="queue-modal-title">Збережені черги та місця</h2>
+
+      <div class="saved-profiles-list" id="saved-profiles-list"></div>
+
+      <button type="button" class="btn-secondary full-width" id="btn-new-profile-mode">
+        + Нова черга / місце
+      </button>
+
+      <hr class="divider" />
+
+      <h3 class="modal-section-subtitle" id="queue-form-title">Редагувати місце</h3>
 
       <div class="queue-grid" id="queue-options-grid"></div>
 
+      <div class="label-presets-row" id="label-presets-row">
+        <button type="button" class="preset-chip" data-preset="Дім">Дім</button>
+        <button type="button" class="preset-chip" data-preset="Робота">Робота</button>
+        <button type="button" class="preset-chip" data-preset="Батьки">Батьки</button>
+        <button type="button" class="preset-chip" data-preset="Дача">Дача</button>
+      </div>
+
       <label class="input-group">
-        <span class="input-label">Адреса або підпис (необов’язково)</span>
+        <span class="input-label">Підпис (напр. Дім, Робота, Батьки)</span>
         <input type="text" id="input-address" class="text-input" placeholder="с. Городище, вул. Польова" />
       </label>
 
@@ -260,9 +280,10 @@
 
   <!-- Edit Hour Modal -->
   <div class="modal-backdrop" id="hour-modal" hidden>
-    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="hour-modal-title">
+    <div class="modal-dialog modal-dialog-scroll" role="dialog" aria-modal="true" aria-labelledby="hour-modal-title">
       <h2 class="modal-title" id="hour-modal-title">Година 00:00 – 01:00</h2>
 
+      <span class="edit-section-label">Уся година одразу:</span>
       <div class="hour-options">
         <button type="button" class="hour-option-btn" data-state="ON">
           <i class="dot dot-on dot-lg"></i>
@@ -276,13 +297,47 @@
           <i class="dot dot-off dot-lg"></i>
           <span>Нема світла (відключення)</span>
         </button>
-        <button type="button" class="btn-secondary full-width" id="btn-reset-hour" hidden>
-          Повернути за графіком
-        </button>
       </div>
 
+      <hr class="divider" />
+
+      <span class="edit-section-label">Точніше по 30 хв:</span>
+      <div class="half-slot-group">
+        <span class="half-slot-time" id="half-first-label">00:00 – 00:30</span>
+        <div class="half-chips-row">
+          <button type="button" class="half-chip-btn" data-half="0" data-state="ON">
+            <i class="dot dot-on"></i><span>Світло</span>
+          </button>
+          <button type="button" class="half-chip-btn" data-half="0" data-state="MAYBE">
+            <i class="dot dot-maybe"></i><span>Можл.</span>
+          </button>
+          <button type="button" class="half-chip-btn" data-half="0" data-state="OFF">
+            <i class="dot dot-off"></i><span>Нема</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="half-slot-group">
+        <span class="half-slot-time" id="half-second-label">00:30 – 01:00</span>
+        <div class="half-chips-row">
+          <button type="button" class="half-chip-btn" data-half="1" data-state="ON">
+            <i class="dot dot-on"></i><span>Світло</span>
+          </button>
+          <button type="button" class="half-chip-btn" data-half="1" data-state="MAYBE">
+            <i class="dot dot-maybe"></i><span>Можл.</span>
+          </button>
+          <button type="button" class="half-chip-btn" data-half="1" data-state="OFF">
+            <i class="dot dot-off"></i><span>Нема</span>
+          </button>
+        </div>
+      </div>
+
+      <button type="button" class="btn-secondary full-width" id="btn-reset-hour" hidden>
+        Повернути за графіком
+      </button>
+
       <div class="dialog-footer">
-        <button type="button" class="text-btn" id="btn-close-hour">Закрити</button>
+        <button type="button" class="text-btn" id="btn-close-hour">Готово</button>
       </div>
     </div>
   </div>
@@ -322,6 +377,6 @@
     </div>
   </div>
 
-  <script src="./app.js?v=7"></script>
+  <script src="./app.js?v=9"></script>
 </body>
 </html>

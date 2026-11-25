@@ -80,17 +80,29 @@ class MainActivity : ComponentActivity() {
                     onSelectQueue = { queueId, address ->
                         viewModel.selectQueue(queueId, address)
                     },
+                    onSwitchProfile = { profileId ->
+                        viewModel.switchProfile(profileId)
+                    },
+                    onUpsertProfile = { profileId, queueId, label ->
+                        viewModel.upsertProfile(profileId, queueId, label)
+                    },
+                    onDeleteProfile = { profileId ->
+                        viewModel.deleteProfile(profileId)
+                    },
                     onSetManualLiveStatus = { state ->
                         viewModel.setManualLiveStatus(state)
                     },
                     onEditHourState = { date, hour, state ->
                         viewModel.setManualHourState(date, hour, state)
                     },
+                    onEditSlotState = { date, slotIndex, state ->
+                        viewModel.setManualSlotState(date, slotIndex, state)
+                    },
                     onClearManualDayEdits = { date ->
                         viewModel.clearManualDayEdits(date)
                     },
                     isHourManuallyEdited = { date, hour ->
-                        viewModel.getHourManualOverride(date, hour) != null
+                        viewModel.hasHourManualOverride(date, hour)
                     },
                     onToggleNotifications = {
                         val currentlyActive =

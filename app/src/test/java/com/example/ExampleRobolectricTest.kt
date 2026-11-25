@@ -13,6 +13,7 @@ import com.example.data.KyivTime
 import com.example.data.PowerScheduleParser
 import com.example.model.DaySchedule
 import com.example.model.KyivDate
+import com.example.model.SavedQueueProfile
 import com.example.model.ScheduleDataset
 import com.example.model.SlotState
 import com.example.ui.MainScreen
@@ -202,5 +203,151 @@ class ExampleRobolectricTest {
             .performScrollTo()
             .assertIsDisplayed()
             .assertTextContains("10:00 – 12:00")
+    }
+
+    @Test
+    fun `main screen supports 30m OFF plus 30m MAYBE display and independent half-hour editing`() {
+        val nowMillis = 1795420800_000L
+        val today = KyivTime.todayDate(nowMillis)
+        val slots = MutableList(48) { SlotState.ON }
+        // 15:00-15:30 OFF (slot 30), 15:30-16:00 MAYBE (slot 31)
+        slots[30] = SlotState.OFF
+        slots[31] = SlotState.MAYBE
+
+        val daySchedule = DaySchedule(date = today, slots = slots)
+        val dataset = ScheduleDataset(
+            days = mapOf(today to daySchedule),
+            lastUpdatedLabel = "25.11 07:02",
+            fetchedAtMillis = nowMillis,
+            isFromCache = false
+        )
+        val at1510 = KyivTime.epochMillisFor(today, 15 * 60 + 10)
+        val snapshot = PowerScheduleParser.computeSnapshot(dataset, at1510)
+
+        val editedSlots = mutableListOf<Pair<Int, SlotState?>>()
+
+        composeTestRule.setContent {
+            SvitloTheme {
+                MainScreen(
+                    uiState = ScheduleUiState(
+                        isLoading = false,
+                        dataset = dataset,
+                        snapshot = snapshot,
+                        nowMillis = at1510
+                    ),
+                    snackbarHostState = SnackbarHostState(),
+                    todayDateLabel = today.formatUkrainianShort(),
+                    tomorrowDateLabel = KyivTime.nextDay(today).formatUkrainianShort(),
+                    onRefresh = {},
+                    onSelectDay = {},
+                    onToggleNotifications = {},
+                    onEditSlotState = { _, slotIdx, state -> editedSlots.add(slotIdx to state) }
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("power_status_headline")
+            .assertIsDisplayed()
+            .assertTextContains("НЕМА СВІТЛА")
+        composeTestRule.onNodeWithTag("countdown_timer_text")
+            .assertIsDisplayed()
+            .assertTextContains("00:20:00")
+        composeTestRule.onNodeWithTag("power_maybe_intervals_text")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertTextContains("15:30 – 16:00")
+        composeTestRule.onNodeWithTag("power_off_intervals_text")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertTextContains("15:00 – 15:30")
+
+        composeTestRule.onNodeWithTag("hour_cell_15")
+            .performScrollTo()
+            .performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("slot_first_off")
+            .performScrollTo()
+            .performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("slot_second_maybe")
+            .performScrollTo()
+            .performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(listOf(30 to SlotState.OFF, 31 to SlotState.MAYBE), editedSlots)
+
+        composeTestRule.onNodeWithTag("edit_hour_done").performClick()
+    }
+
+    @Test
+    fun `main screen switches between saved labeled queues and adds a new labeled place`() {
+        val nowMillis = 1795420800_000L
+        val today = KyivTime.todayDate(nowMillis)
+        val slots = List(48) { SlotState.ON }
+        val daySchedule = DaySchedule(date = today, slots = slots)
+        val dataset = ScheduleDataset(
+            queueId = "3.1",
+            days = mapOf(today to daySchedule),
+            lastUpdatedLabel = "25.11 07:02",
+            fetchedAtMillis = nowMillis,
+            isFromCache = false
+        )
+        val snapshot = PowerScheduleParser.computeSnapshot(dataset, nowMillis)
+        val profiles = listOf(
+            SavedQueueProfile("p1", "3.1", "Дім"),
+            SavedQueueProfile("p2", "1.2", "Робота")
+        )
+
+        var switchedProfileId: String? = null
+        var upserted: Triple<String?, String, String>? = null
+
+        composeTestRule.setContent {
+            SvitloTheme {
+                MainScreen(
+                    uiState = ScheduleUiState(
+                        isLoading = false,
+                        selectedQueue = "3.1",
+                        addressLabel = "Дім",
+                        savedProfiles = profiles,
+                        activeProfileId = "p1",
+                        dataset = dataset,
+                        snapshot = snapshot,
+                        nowMillis = nowMillis
+                    ),
+                    snackbarHostState = SnackbarHostState(),
+                    todayDateLabel = today.formatUkrainianShort(),
+                    tomorrowDateLabel = KyivTime.nextDay(today).formatUkrainianShort(),
+                    onRefresh = {},
+                    onSelectDay = {},
+                    onToggleNotifications = {},
+                    onSwitchProfile = { switchedProfileId = it },
+                    onUpsertProfile = { id, q, label -> upserted = Triple(id, q, label) }
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("saved_profile_chip_p2")
+            .assertIsDisplayed()
+            .performClick()
+        assertEquals("p2", switchedProfileId)
+
+        composeTestRule.onNodeWithTag("add_queue_profile_button")
+            .assertIsDisplayed()
+            .performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("queue_option_5.2")
+            .performScrollTo()
+            .performClick()
+        composeTestRule.onNodeWithTag("preset_label_Батьки")
+            .performScrollTo()
+            .performClick()
+        composeTestRule.onNodeWithTag("save_queue_button")
+            .performScrollTo()
+            .performClick()
+
+        assertEquals(Triple(null, "5.2", "Батьки"), upserted)
     }
 }

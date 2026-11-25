@@ -222,4 +222,104 @@ class PowerScheduleParserTest {
         assertEquals(listOf("1.2", "3.1"), dataset12.availableQueues)
         assertEquals(60, dataset12.days[date]!!.totalOffMinutes)
     }
+
+    @Test
+    fun `handles 30m OFF plus 30m MAYBE hybrid hours and independent 30m slot overrides`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = SchedulePreferences(context)
+        val date = KyivDate(2026, 11, 25)
+        val midnightEpochSec = KyivTime.epochMillisFor(date, 0) / 1000L
+        prefs.clearDaySlotOverrides("1.2", date)
+
+        // Matches user screenshot 25.11.2026 Queue 1.2:
+        // 11:00-12:00 (hr 12): msecond (30m ON + 30m MAYBE)
+        // 12:00-15:00 (hr 13..15): no (OFF)
+        // 15:00-16:00 (hr 16): first_msecond (30m OFF + 30m MAYBE)
+        val json = """
+            {
+              "fact": {
+                "data": {
+                  "$midnightEpochSec": {
+                    "GPV1.2": {
+                      "12": "msecond",
+                      "13": "no",
+                      "14": "no",
+                      "15": "no",
+                      "16": "first_msecond"
+                    }
+                  }
+                }
+              }
+            }
+        """.trimIndent()
+
+        val parsed = PowerScheduleParser.parseJson(json, queueId = "1.2")
+        val day = parsed.days[date]!!
+
+        val offRanges = PowerScheduleParser.computeTimeRanges(day.slots, SlotState.OFF)
+        val maybeRanges = PowerScheduleParser.computeTimeRanges(day.slots, SlotState.MAYBE)
+        assertEquals(listOf("12:00 – 15:30"), offRanges.map { it.format() })
+        assertEquals(listOf("11:30 – 12:00", "15:30 – 16:00"), maybeRanges.map { it.format() })
+        assertEquals(210, day.totalOffMinutes)
+        assertEquals(60, day.totalMaybeMinutes)
+
+        // At 15:10: currently OFF until 15:30 (20 min = 1200s), next is MAYBE
+        val at1510 = KyivTime.epochMillisFor(date, 15 * 60 + 10)
+        val snap = PowerScheduleParser.computeSnapshot(parsed, at1510)
+        assertEquals(SlotState.OFF, snap.effectiveState)
+        assertEquals(1200L, snap.remainingSeconds)
+        assertEquals("15:30", snap.nextChangeTimeLabel)
+        assertEquals(SlotState.MAYBE, snap.nextChangeTargetState)
+
+        // Test independent 30-min manual slot override on 18:00-19:00 (hour 18 -> slots 36, 37)
+        prefs.setSlotOverride("1.2", date, slotIdx = 37, state = SlotState.MAYBE)
+        assertTrue(prefs.hasHourManualOverride("1.2", date, 18))
+        val merged = prefs.applyManualSlotOverrides(parsed)
+        val mergedDay = merged.days[date]!!
+        assertEquals(SlotState.ON, mergedDay.slots[36])
+        assertEquals(SlotState.MAYBE, mergedDay.slots[37])
+        prefs.clearDaySlotOverrides("1.2", date)
+    }
+
+    @Test
+    fun `manages multiple labeled queue profiles separately and deletes extras safely`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = SchedulePreferences(context)
+
+        // Default migration creates initial profile
+        val initial = prefs.getSavedProfiles()
+        assertTrue(initial.isNotEmpty())
+        val firstId = initial.first().id
+
+        // Rename first profile to "Дім"
+        val home = prefs.saveProfile(firstId, "3.1", "Дім")
+        assertEquals("3.1", home.queueId)
+        assertEquals("Дім", home.label)
+
+        // Add "Робота" (1.2) and "Батьки" (4.1)
+        val work = prefs.saveProfile(null, "1.2", "Робота")
+        val parents = prefs.saveProfile(null, "4.1", "Батьки")
+        assertEquals("4.1", prefs.selectedQueue)
+        assertEquals("Батьки", prefs.addressLabel)
+        assertEquals(3, prefs.getSavedProfiles().size)
+
+        // Switch back to "Робота"
+        val switched = prefs.selectProfile(work.id)!!
+        assertEquals("1.2", switched.queueId)
+        assertEquals("Робота", prefs.addressLabel)
+        assertEquals("1.2", prefs.selectedQueue)
+
+        // Delete "Робота" -> switches to remaining first profile ("Дім")
+        val fallback = prefs.deleteProfile(work.id)!!
+        assertEquals(home.id, fallback.id)
+        assertEquals("3.1", prefs.selectedQueue)
+        assertEquals("Дім", prefs.addressLabel)
+        assertEquals(2, prefs.getSavedProfiles().size)
+
+        // Clean up extra profile
+        prefs.deleteProfile(parents.id)
+        assertEquals(1, prefs.getSavedProfiles().size)
+        // Cannot delete the last remaining profile
+        assertNull(prefs.deleteProfile(home.id))
+    }
 }

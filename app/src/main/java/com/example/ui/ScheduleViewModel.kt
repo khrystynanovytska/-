@@ -9,6 +9,7 @@ import com.example.data.SchedulePreferences
 import com.example.data.ScheduleRepository
 import com.example.model.KyivDate
 import com.example.model.PowerStatusSnapshot
+import com.example.model.SavedQueueProfile
 import com.example.model.ScheduleDataset
 import com.example.model.SlotState
 import com.example.notifications.OutageAlarmScheduler
@@ -28,6 +29,8 @@ data class ScheduleUiState(
     val errorMessage: String? = null,
     val selectedQueue: String = SchedulePreferences.DEFAULT_QUEUE,
     val addressLabel: String = SchedulePreferences.DEFAULT_ADDRESS,
+    val savedProfiles: List<SavedQueueProfile> = emptyList(),
+    val activeProfileId: String = SchedulePreferences.DEFAULT_PROFILE_ID,
     val availableQueues: List<String> = ScheduleDataset.DEFAULT_QUEUES,
     val dataset: ScheduleDataset? = null,
     val snapshot: PowerStatusSnapshot? = null,
@@ -42,10 +45,15 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
     private val prefs = SchedulePreferences(context)
     private val repository = ScheduleRepository(context, prefs)
 
+    private val initialProfiles = prefs.getSavedProfiles()
+    private val initialActiveProfile = prefs.getActiveProfile()
+
     private val _uiState = MutableStateFlow(
         ScheduleUiState(
-            selectedQueue = prefs.selectedQueue,
-            addressLabel = prefs.addressLabel,
+            selectedQueue = initialActiveProfile.queueId,
+            addressLabel = initialActiveProfile.label,
+            savedProfiles = initialProfiles,
+            activeProfileId = initialActiveProfile.id,
             notificationsEnabled = prefs.notificationsEnabled,
             hasNotificationPermission = OutageNotificationHelper.hasNotificationPermission(context)
         )
@@ -187,6 +195,12 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
         reapplyMergedDataset(queueId)
     }
 
+    fun setManualSlotState(date: KyivDate, slotIndex: Int, state: SlotState?) {
+        val queueId = _uiState.value.selectedQueue
+        prefs.setSlotOverride(queueId, date, slotIndex, state)
+        reapplyMergedDataset(queueId)
+    }
+
     fun clearManualDayEdits(date: KyivDate) {
         val queueId = _uiState.value.selectedQueue
         prefs.clearDaySlotOverrides(queueId, date)
@@ -195,6 +209,10 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
 
     fun getHourManualOverride(date: KyivDate, hour: Int): SlotState? {
         return prefs.getHourOverride(_uiState.value.selectedQueue, date, hour)
+    }
+
+    fun hasHourManualOverride(date: KyivDate, hour: Int): Boolean {
+        return prefs.hasHourManualOverride(_uiState.value.selectedQueue, date, hour)
     }
 
     private fun reapplyMergedDataset(queueId: String) {
@@ -214,20 +232,51 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun selectQueue(queueId: String, customAddress: String) {
-        val cleanedAddress = customAddress.trim()
-        prefs.selectedQueue = queueId
-        prefs.addressLabel = cleanedAddress
+        upsertProfile(
+            profileId = _uiState.value.activeProfileId,
+            queueId = queueId,
+            customLabel = customAddress
+        )
+    }
+
+    fun switchProfile(profileId: String) {
+        val target = prefs.selectProfile(profileId) ?: return
+        applyActiveProfileState(target, clearManualLive = true)
+    }
+
+    fun upsertProfile(profileId: String?, queueId: String, customLabel: String) {
+        val previousQueue = _uiState.value.selectedQueue
+        val saved = prefs.saveProfile(profileId, queueId, customLabel)
+        val queueChanged = previousQueue != saved.queueId || profileId == null
+        applyActiveProfileState(saved, clearManualLive = queueChanged)
+    }
+
+    fun deleteProfile(profileId: String) {
+        val nextActive = prefs.deleteProfile(profileId) ?: return
+        applyActiveProfileState(nextActive, clearManualLive = true)
+    }
+
+    private fun applyActiveProfileState(
+        activeProfile: SavedQueueProfile,
+        clearManualLive: Boolean
+    ) {
+        val updatedProfiles = prefs.getSavedProfiles()
         prefs.lastNotifiedOutageStartMillis = 0L
-        prefs.setManualStatusOverride(null, 0L)
+        if (clearManualLive) {
+            prefs.setManualStatusOverride(null, 0L)
+        }
 
         val now = System.currentTimeMillis()
-        val reparsed = repository.getCachedDataset(queueId = queueId)
+        val manualOverride = prefs.getActiveManualOverride(now)
+        val reparsed = repository.getCachedDataset(queueId = activeProfile.queueId)
         if (reparsed != null) {
-            val snapshot = PowerScheduleParser.computeSnapshot(reparsed, now, null)
+            val snapshot = PowerScheduleParser.computeSnapshot(reparsed, now, manualOverride)
             _uiState.update {
                 it.copy(
-                    selectedQueue = queueId,
-                    addressLabel = cleanedAddress,
+                    selectedQueue = activeProfile.queueId,
+                    addressLabel = activeProfile.label,
+                    savedProfiles = updatedProfiles,
+                    activeProfileId = activeProfile.id,
                     availableQueues = reparsed.availableQueues,
                     dataset = reparsed,
                     snapshot = snapshot,
@@ -240,8 +289,10 @@ class ScheduleViewModel(application: Application) : AndroidViewModel(application
         } else {
             _uiState.update {
                 it.copy(
-                    selectedQueue = queueId,
-                    addressLabel = cleanedAddress
+                    selectedQueue = activeProfile.queueId,
+                    addressLabel = activeProfile.label,
+                    savedProfiles = updatedProfiles,
+                    activeProfileId = activeProfile.id
                 )
             }
             refresh(isManual = true)

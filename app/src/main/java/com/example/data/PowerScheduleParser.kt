@@ -116,6 +116,8 @@ object PowerScheduleParser {
         "second" -> SlotState.ON to SlotState.OFF
         "msecond" -> SlotState.ON to SlotState.MAYBE
         "maybe" -> SlotState.MAYBE to SlotState.MAYBE
+        "first_msecond", "first_maybe", "no_msecond", "off_maybe" -> SlotState.OFF to SlotState.MAYBE
+        "mfirst_second", "maybe_second", "mfirst_no", "maybe_off" -> SlotState.MAYBE to SlotState.OFF
         else -> SlotState.ON to SlotState.ON
     }
 

@@ -9,6 +9,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -34,7 +36,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.outlined.NotificationsOff
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FlashOff
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.NotificationsActive
@@ -72,15 +76,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
@@ -88,6 +96,7 @@ import com.example.data.ScheduleRepository
 import com.example.model.DaySchedule
 import com.example.model.KyivDate
 import com.example.model.PowerStatusSnapshot
+import com.example.model.SavedQueueProfile
 import com.example.model.SlotState
 import com.example.model.TimeRange
 import com.example.ui.theme.AmberWarning
@@ -118,13 +127,23 @@ fun MainScreen(
     onSelectDay: (Boolean) -> Unit,
     onToggleNotifications: () -> Unit,
     onSelectQueue: (String, String) -> Unit = { _, _ -> },
+    onSwitchProfile: (String) -> Unit = {},
+    onUpsertProfile: (String?, String, String) -> Unit = { _, _, _ -> },
+    onDeleteProfile: (String) -> Unit = {},
     onSetManualLiveStatus: (SlotState?) -> Unit = {},
     onEditHourState: (KyivDate, Int, SlotState?) -> Unit = { _, _, _ -> },
+    onEditSlotState: (KyivDate, Int, SlotState?) -> Unit = { _, _, _ -> },
     onClearManualDayEdits: (KyivDate) -> Unit = {},
     isHourManuallyEdited: (KyivDate, Int) -> Boolean = { _, _ -> false }
 ) {
     var showQueueSheet by remember { mutableStateOf(false) }
+    var queueSheetStartAddMode by remember { mutableStateOf(false) }
     var editingHourTarget by remember { mutableStateOf<Pair<KyivDate, Int>?>(null) }
+    val displayedProfiles = remember(uiState.savedProfiles, uiState.activeProfileId, uiState.selectedQueue, uiState.addressLabel) {
+        uiState.savedProfiles.ifEmpty {
+            listOf(SavedQueueProfile(uiState.activeProfileId, uiState.selectedQueue, uiState.addressLabel))
+        }
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -152,15 +171,30 @@ fun MainScreen(
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    HeaderBar(
-                        selectedQueue = uiState.selectedQueue,
-                        addressLabel = uiState.addressLabel,
-                        notificationsActive = uiState.notificationsEnabled && uiState.hasNotificationPermission,
-                        isRefreshing = uiState.isRefreshing || uiState.isLoading,
-                        onOpenQueueSelector = { showQueueSheet = true },
-                        onToggleNotifications = onToggleNotifications,
-                        onRefresh = onRefresh
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        HeaderBar(
+                            selectedQueue = uiState.selectedQueue,
+                            addressLabel = uiState.addressLabel,
+                            notificationsActive = uiState.notificationsEnabled && uiState.hasNotificationPermission,
+                            isRefreshing = uiState.isRefreshing || uiState.isLoading,
+                            onOpenQueueSelector = {
+                                queueSheetStartAddMode = false
+                                showQueueSheet = true
+                            },
+                            onToggleNotifications = onToggleNotifications,
+                            onRefresh = onRefresh
+                        )
+
+                        SavedQueuesStrip(
+                            profiles = displayedProfiles,
+                            activeProfileId = uiState.activeProfileId,
+                            onSelectProfile = onSwitchProfile,
+                            onAddNewPlace = {
+                                queueSheetStartAddMode = true
+                                showQueueSheet = true
+                            }
+                        )
+                    }
 
                     when {
                         uiState.isLoading && uiState.snapshot == null -> {
@@ -245,25 +279,40 @@ fun MainScreen(
 
     if (showQueueSheet) {
         QueueSelectorBottomSheet(
-            currentQueue = uiState.selectedQueue,
-            currentAddress = uiState.addressLabel,
+            savedProfiles = displayedProfiles,
+            activeProfileId = uiState.activeProfileId,
+            startInAddMode = queueSheetStartAddMode,
             availableQueues = uiState.availableQueues,
             onDismiss = { showQueueSheet = false },
-            onConfirm = { queueId, address ->
+            onSwitchProfile = onSwitchProfile,
+            onSaveProfile = { profileId, queueId, label ->
                 showQueueSheet = false
-                onSelectQueue(queueId, address)
-            }
+                if (uiState.savedProfiles.isEmpty() && profileId != null) {
+                    onSelectQueue(queueId, label)
+                } else {
+                    onUpsertProfile(profileId, queueId, label)
+                }
+            },
+            onDeleteProfile = onDeleteProfile
         )
     }
 
     editingHourTarget?.let { (date, hour) ->
+        val daySlots = uiState.dataset?.days?.get(date)?.slots
+        val firstHalfState = daySlots?.getOrElse(hour * 2) { SlotState.ON } ?: SlotState.ON
+        val secondHalfState = daySlots?.getOrElse(hour * 2 + 1) { SlotState.ON } ?: SlotState.ON
         EditHourDialog(
             hour = hour,
+            firstHalfState = firstHalfState,
+            secondHalfState = secondHalfState,
             hasManualOverride = isHourManuallyEdited(date, hour),
             onDismiss = { editingHourTarget = null },
-            onSelectState = { chosenState ->
+            onSelectWholeHour = { chosenState ->
                 editingHourTarget = null
                 onEditHourState(date, hour, chosenState)
+            },
+            onSelectHalfSlot = { slotOffset, chosenState ->
+                onEditSlotState(date, hour * 2 + slotOffset, chosenState)
             }
         )
     }
@@ -511,7 +560,11 @@ private fun HeroStatusCard(
                                 Text(
                                     text = when (snapshot.nextChangeTargetState) {
                                         SlotState.ON -> stringResource(R.string.next_on_at, snapshot.nextChangeTimeLabel)
-                                        SlotState.MAYBE -> "Можливе вимкнення о ${snapshot.nextChangeTimeLabel}"
+                                        SlotState.MAYBE -> if (snapshot.effectiveState == SlotState.ON) {
+                                            stringResource(R.string.next_maybe_at, snapshot.nextChangeTimeLabel)
+                                        } else {
+                                            stringResource(R.string.next_maybe_from, snapshot.nextChangeTimeLabel)
+                                        }
                                         SlotState.OFF, null -> stringResource(R.string.next_off_at, snapshot.nextChangeTimeLabel)
                                     },
                                     style = MaterialTheme.typography.labelLarge,
@@ -866,33 +919,67 @@ private fun Timeline24hBar(
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(26.dp)
+                .height(28.dp)
         ) {
             val totalWidth = size.width
             val barHeight = size.height - 6.dp.toPx()
             val topY = 3.dp.toPx()
-            val slotWidth = totalWidth / 48f
-            val gap = 1.dp.toPx()
+            val hourWidth = totalWidth / 24f
+            val hourGap = 1.5.dp.toPx()
+            val radius = CornerRadius(10.dp.toPx(), 10.dp.toPx())
 
             drawRoundRect(
                 color = trackColor,
                 topLeft = Offset(0f, topY),
                 size = Size(totalWidth, barHeight),
-                cornerRadius = CornerRadius(10.dp.toPx(), 10.dp.toPx())
+                cornerRadius = radius
             )
 
-            for (i in 0 until 48) {
-                val color = when (slots.getOrElse(i) { SlotState.ON }) {
-                    SlotState.ON -> PowerOnGreenBright
-                    SlotState.MAYBE -> AmberWarning
-                    SlotState.OFF -> PowerOffRedBright
-                }
-                val x = i * slotWidth
-                drawRect(
-                    color = color,
-                    topLeft = Offset(x, topY),
-                    size = Size((slotWidth - gap).coerceAtLeast(1f), barHeight)
+            val barClip = Path().apply {
+                addRoundRect(
+                    RoundRect(
+                        left = 0f,
+                        top = topY,
+                        right = totalWidth,
+                        bottom = topY + barHeight,
+                        cornerRadius = radius
+                    )
                 )
+            }
+
+            fun colorFor(state: SlotState) = when (state) {
+                SlotState.ON -> PowerOnGreenBright
+                SlotState.MAYBE -> AmberWarning
+                SlotState.OFF -> PowerOffRedBright
+            }
+
+            clipPath(barClip) {
+                for (h in 0 until 24) {
+                    val x = h * hourWidth
+                    val blockWidth = (hourWidth - if (h < 23) hourGap else 0f).coerceAtLeast(2f)
+                    val halfWidth = blockWidth / 2f
+                    val firstHalf = slots.getOrElse(h * 2) { SlotState.ON }
+                    val secondHalf = slots.getOrElse(h * 2 + 1) { SlotState.ON }
+
+                    drawRect(
+                        color = colorFor(firstHalf),
+                        topLeft = Offset(x, topY),
+                        size = Size(halfWidth, barHeight)
+                    )
+                    drawRect(
+                        color = colorFor(secondHalf),
+                        topLeft = Offset(x + halfWidth, topY),
+                        size = Size(blockWidth - halfWidth, barHeight)
+                    )
+                    if (firstHalf != secondHalf) {
+                        drawLine(
+                            color = Color.Black.copy(alpha = 0.28f),
+                            start = Offset(x + halfWidth, topY),
+                            end = Offset(x + halfWidth, topY + barHeight),
+                            strokeWidth = 0.8.dp.toPx()
+                        )
+                    }
+                }
             }
 
             if (showNowMarker) {
@@ -996,6 +1083,14 @@ private fun HourlyMatrixGrid(
                                     .fillMaxSize()
                                     .background(bgFor(firstHalf))
                             )
+                            if (!bothSame) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(1.dp)
+                                        .fillMaxHeight()
+                                        .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.7f))
+                                )
+                            }
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
@@ -1004,14 +1099,31 @@ private fun HourlyMatrixGrid(
                             )
                         }
 
-                        Text(
-                            text = String.format("%02d:00", hour),
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontFamily = JetBrainsMonoFontFamily,
-                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium
-                            ),
-                            color = labelColor
-                        )
+                        if (bothSame) {
+                            Text(
+                                text = String.format("%02d:00", hour),
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium
+                                ),
+                                color = labelColor
+                            )
+                        } else {
+                            Surface(
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = String.format("%02d:00", hour),
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.SemiBold
+                                    ),
+                                    color = labelColor,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1231,11 +1343,17 @@ private fun SourceFooter(
 @Composable
 private fun EditHourDialog(
     hour: Int,
+    firstHalfState: SlotState,
+    secondHalfState: SlotState,
     hasManualOverride: Boolean,
     onDismiss: () -> Unit,
-    onSelectState: (SlotState?) -> Unit
+    onSelectWholeHour: (SlotState?) -> Unit,
+    onSelectHalfSlot: (Int, SlotState) -> Unit
 ) {
     val rangeTitle = String.format("%02d:00 – %02d:00", hour, hour + 1)
+    val firstRangeLabel = String.format("%02d:00 – %02d:30", hour, hour)
+    val secondRangeLabel = String.format("%02d:30 – %02d:00", hour, hour + 1)
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -1245,28 +1363,100 @@ private fun EditHourDialog(
             )
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                HourStateOptionButton(
-                    color = PowerOnGreenBright,
-                    label = stringResource(R.string.option_power_on),
-                    testTag = "edit_hour_on",
-                    onClick = { onSelectState(SlotState.ON) }
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.edit_hour_whole_label),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                HourStateOptionButton(
-                    color = AmberWarning,
-                    label = stringResource(R.string.option_possible_outage),
-                    testTag = "edit_hour_maybe",
-                    onClick = { onSelectState(SlotState.MAYBE) }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(
+                        Triple(SlotState.ON, PowerOnGreenBright, stringResource(R.string.chip_on_short) to "edit_hour_on"),
+                        Triple(SlotState.MAYBE, AmberWarning, stringResource(R.string.chip_maybe_short) to "edit_hour_maybe"),
+                        Triple(SlotState.OFF, PowerOffRedBright, stringResource(R.string.chip_off_short) to "edit_hour_off")
+                    ).forEach { (slotState, dotColor, labelAndTag) ->
+                        val (label, tag) = labelAndTag
+                        val isSelected = firstHalfState == slotState && secondHalfState == slotState
+                        Surface(
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            border = if (isSelected) {
+                                BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+                            } else {
+                                null
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onSelectWholeHour(slotState) }
+                                .testTag(tag)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(9.dp)
+                                        .clip(CircleShape)
+                                        .background(dotColor)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.padding(vertical = 2.dp)
                 )
-                HourStateOptionButton(
-                    color = PowerOffRedBright,
-                    label = stringResource(R.string.option_power_off),
-                    testTag = "edit_hour_off",
-                    onClick = { onSelectState(SlotState.OFF) }
+
+                Text(
+                    text = stringResource(R.string.edit_hour_half_label),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
+                HalfSlotSelectorRow(
+                    timeRangeLabel = firstRangeLabel,
+                    selectedState = firstHalfState,
+                    prefixTag = "slot_first",
+                    onSelect = { onSelectHalfSlot(0, it) }
+                )
+
+                HalfSlotSelectorRow(
+                    timeRangeLabel = secondRangeLabel,
+                    selectedState = secondHalfState,
+                    prefixTag = "slot_second",
+                    onSelect = { onSelectHalfSlot(1, it) }
+                )
+
                 if (hasManualOverride) {
                     OutlinedButton(
-                        onClick = { onSelectState(null) },
+                        onClick = { onSelectWholeHour(null) },
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1279,48 +1469,87 @@ private fun EditHourDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Закрити")
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.testTag("edit_hour_done")
+            ) {
+                Text("Готово")
             }
         }
     )
 }
 
 @Composable
-private fun HourStateOptionButton(
-    color: Color,
-    label: String,
-    testTag: String,
-    onClick: () -> Unit
+private fun HalfSlotSelectorRow(
+    timeRangeLabel: String,
+    selectedState: SlotState,
+    prefixTag: String,
+    onSelect: (SlotState) -> Unit
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(14.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(50.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
-            .testTag(testTag)
-    ) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = timeRangeLabel,
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.SemiBold
+            ),
+            color = MaterialTheme.colorScheme.onSurface
+        )
         Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(14.dp)
-                    .clip(CircleShape)
-                    .background(color)
-            )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            listOf(
+                Triple(SlotState.ON, PowerOnGreenBright, stringResource(R.string.chip_on_short) to "${prefixTag}_on"),
+                Triple(SlotState.MAYBE, AmberWarning, stringResource(R.string.chip_maybe_short) to "${prefixTag}_maybe"),
+                Triple(SlotState.OFF, PowerOffRedBright, stringResource(R.string.chip_off_short) to "${prefixTag}_off")
+            ).forEach { (slotState, dotColor, labelAndTag) ->
+                val (label, tag) = labelAndTag
+                val isSelected = selectedState == slotState
+                Surface(
+                    color = if (isSelected) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    border = if (isSelected) {
+                        BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+                    } else {
+                        null
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onSelect(slotState) }
+                        .testTag(tag)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(9.dp)
+                                .clip(CircleShape)
+                                .background(dotColor)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -1417,19 +1646,148 @@ fun formatDurationUa(totalMinutes: Int): String {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SavedQueuesStrip(
+    profiles: List<SavedQueueProfile>,
+    activeProfileId: String,
+    onSelectProfile: (String) -> Unit,
+    onAddNewPlace: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .testTag("saved_queues_strip"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        profiles.forEach { profile ->
+            val isSelected = profile.id == activeProfileId
+            Surface(
+                color = if (isSelected) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surface
+                },
+                shape = RoundedCornerShape(50),
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = if (isSelected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.outline
+                    }
+                ),
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .clip(RoundedCornerShape(50))
+                    .clickable { onSelectProfile(profile.id) }
+                    .testTag("saved_profile_chip_${profile.id}")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    if (profile.label.isNotBlank()) {
+                        Text(
+                            text = profile.label,
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 150.dp)
+                        )
+                        Text(
+                            text = "· ${profile.queueId}",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontFamily = JetBrainsMonoFontFamily,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    } else {
+                        Text(
+                            text = stringResource(R.string.queue_format, profile.queueId),
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        }
+
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = RoundedCornerShape(50),
+            modifier = Modifier
+                .minimumInteractiveComponentSize()
+                .clip(RoundedCornerShape(50))
+                .clickable(onClick = onAddNewPlace)
+                .testTag("add_queue_profile_button")
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Add,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = stringResource(R.string.add_place_chip),
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun QueueSelectorBottomSheet(
-    currentQueue: String,
-    currentAddress: String,
+    savedProfiles: List<SavedQueueProfile>,
+    activeProfileId: String,
+    startInAddMode: Boolean,
     availableQueues: List<String>,
     onDismiss: () -> Unit,
-    onConfirm: (String, String) -> Unit
+    onSwitchProfile: (String) -> Unit,
+    onSaveProfile: (String?, String, String) -> Unit,
+    onDeleteProfile: (String) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
-    var pickedQueue by remember { mutableStateOf(currentQueue) }
-    var editedAddress by remember { mutableStateOf(currentAddress) }
+    var editingProfileId by remember(startInAddMode, activeProfileId) {
+        mutableStateOf(if (startInAddMode) null else activeProfileId)
+    }
+    val targetProfile = savedProfiles.firstOrNull { it.id == editingProfileId }
+    var pickedQueue by remember(editingProfileId) {
+        mutableStateOf(
+            targetProfile?.queueId ?: savedProfiles.firstOrNull { it.id == activeProfileId }?.queueId ?: "3.1"
+        )
+    }
+    var editedAddress by remember(editingProfileId) {
+        mutableStateOf(targetProfile?.label ?: "")
+    }
+
+    val labelPresets = listOf(
+        stringResource(R.string.preset_home),
+        stringResource(R.string.preset_work),
+        stringResource(R.string.preset_parents),
+        stringResource(R.string.preset_dacha)
+    )
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1440,13 +1798,126 @@ private fun QueueSelectorBottomSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Text(
-                text = stringResource(R.string.select_queue_title),
+                text = stringResource(R.string.saved_queues_title),
                 style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                savedProfiles.forEach { profile ->
+                    val isActive = profile.id == activeProfileId
+                    val isBeingEdited = profile.id == editingProfileId
+                    Surface(
+                        color = if (isBeingEdited) {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        border = if (isBeingEdited || isActive) {
+                            BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+                        } else {
+                            null
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable {
+                                editingProfileId = profile.id
+                                pickedQueue = profile.queueId
+                                editedAddress = profile.label
+                                onSwitchProfile(profile.id)
+                            }
+                            .testTag("sheet_profile_row_${profile.id}")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = profile.label.ifBlank {
+                                        stringResource(R.string.queue_format, profile.queueId)
+                                    },
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = stringResource(R.string.queue_format, profile.queueId) +
+                                        if (isActive) " · активна" else "",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            if (savedProfiles.size > 1) {
+                                IconButton(
+                                    onClick = {
+                                        if (editingProfileId == profile.id) {
+                                            editingProfileId = savedProfiles.firstOrNull { it.id != profile.id }?.id
+                                        }
+                                        onDeleteProfile(profile.id)
+                                    },
+                                    modifier = Modifier
+                                        .minimumInteractiveComponentSize()
+                                        .testTag("delete_profile_${profile.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = stringResource(R.string.delete_place_cd),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (editingProfileId != null) {
+                    OutlinedButton(
+                        onClick = {
+                            editingProfileId = null
+                            editedAddress = ""
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("new_profile_mode_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(stringResource(R.string.add_new_place_title))
+                    }
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+
+            Text(
+                text = if (editingProfileId == null) {
+                    stringResource(R.string.add_new_place_title)
+                } else {
+                    stringResource(R.string.edit_current_place_title)
+                },
+                style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
 
@@ -1470,14 +1941,7 @@ private fun QueueSelectorBottomSheet(
                                     .weight(1f)
                                     .height(48.dp)
                                     .clip(RoundedCornerShape(12.dp))
-                                    .clickable {
-                                        pickedQueue = queue
-                                        if (queue != "3.1" && editedAddress == "с. Городище, вул. Польова") {
-                                            editedAddress = ""
-                                        } else if (queue == "3.1" && editedAddress.isBlank()) {
-                                            editedAddress = "с. Городище, вул. Польова"
-                                        }
-                                    }
+                                    .clickable { pickedQueue = queue }
                                     .testTag("queue_option_$queue")
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
@@ -1503,10 +1967,43 @@ private fun QueueSelectorBottomSheet(
                 }
             }
 
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                labelPresets.forEach { preset ->
+                    val chosen = editedAddress.trim().equals(preset, ignoreCase = true)
+                    Surface(
+                        color = if (chosen) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        },
+                        shape = RoundedCornerShape(50),
+                        border = if (chosen) {
+                            BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+                        } else {
+                            null
+                        },
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .clickable { editedAddress = preset }
+                            .testTag("preset_label_$preset")
+                    ) {
+                        Text(
+                            text = preset,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                        )
+                    }
+                }
+            }
+
             OutlinedTextField(
                 value = editedAddress,
                 onValueChange = { editedAddress = it },
-                label = { Text(stringResource(R.string.address_label_hint)) },
+                label = { Text(stringResource(R.string.place_label_hint)) },
                 singleLine = true,
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
@@ -1543,7 +2040,7 @@ private fun QueueSelectorBottomSheet(
             }
 
             Button(
-                onClick = { onConfirm(pickedQueue, editedAddress) },
+                onClick = { onSaveProfile(editingProfileId, pickedQueue, editedAddress) },
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1551,7 +2048,11 @@ private fun QueueSelectorBottomSheet(
                     .testTag("save_queue_button")
             ) {
                 Text(
-                    text = stringResource(R.string.save_queue),
+                    text = if (editingProfileId == null) {
+                        stringResource(R.string.add_place_btn)
+                    } else {
+                        stringResource(R.string.save_queue)
+                    },
                     style = MaterialTheme.typography.titleMedium
                 )
             }

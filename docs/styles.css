@@ -45,6 +45,11 @@
     --red-soft: #7F1D1D;
     --red-text: #FEE2E2;
   }
+
+  .hour-label.mixed {
+    background: rgba(17, 24, 39, 0.85);
+    color: #F8FAFC;
+  }
 }
 
 * {
@@ -148,6 +153,74 @@ body {
 
 .icon-20 { width: 22px; height: 22px; color: var(--on-muted); }
 .icon-22 { width: 22px; height: 22px; }
+
+/* Saved Queues Quick Strip */
+.saved-queues-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 0;
+  scrollbar-width: none;
+}
+
+.saved-queues-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.saved-queue-chip {
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--outline);
+  background: var(--surface);
+  color: var(--on-surface);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.saved-queue-chip.active {
+  border-color: var(--primary);
+  background: var(--green-soft);
+  color: var(--green-text);
+  font-weight: 700;
+}
+
+.saved-queue-label {
+  max-width: 145px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saved-queue-num {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.saved-queue-chip-add {
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: none;
+  background: var(--surface-variant);
+  color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
 
 /* Install banner */
 .install-banner {
@@ -517,7 +590,7 @@ body {
 .timeline-bar {
   position: relative;
   width: 100%;
-  height: 26px;
+  height: 28px;
   padding: 3px 0;
 }
 
@@ -525,11 +598,26 @@ body {
   width: 100%;
   height: 100%;
   display: grid;
-  grid-template-columns: repeat(48, 1fr);
-  gap: 1px;
+  grid-template-columns: repeat(24, 1fr);
+  gap: 1.5px;
   border-radius: 10px;
   overflow: hidden;
   background: var(--surface-variant);
+}
+
+.t-hour {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  height: 100%;
+  overflow: hidden;
+}
+
+.t-hour.split .t-slot:first-child {
+  border-right: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.t-slot {
+  height: 100%;
 }
 
 .t-slot.on { background: var(--green-bright); }
@@ -621,6 +709,13 @@ body {
 .hour-half.maybe { background: var(--maybe-soft); }
 .hour-half.off { background: var(--red-soft); }
 
+.hour-divider-mid {
+  width: 1px;
+  background: var(--outline);
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
 .hour-label {
   position: relative;
   z-index: 1;
@@ -629,7 +724,13 @@ body {
 .hour-label.on { color: var(--green-text); }
 .hour-label.maybe { color: var(--maybe-text); }
 .hour-label.off { color: var(--red-text); }
-.hour-label.mixed { color: var(--on-surface); }
+.hour-label.mixed {
+  background: rgba(255, 255, 255, 0.85);
+  color: #0F172A;
+  padding: 2px 5px;
+  border-radius: 6px;
+  font-weight: 700;
+}
 
 .legend-row {
   margin-top: 12px;
@@ -817,6 +918,106 @@ body {
   font-weight: 800;
 }
 
+.modal-section-subtitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--on-surface);
+}
+
+.saved-profiles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.saved-profile-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 6px 8px 14px;
+  border-radius: 14px;
+  background: var(--surface-variant);
+  border: 1.5px solid transparent;
+  cursor: pointer;
+}
+
+.saved-profile-row.active {
+  border-color: var(--primary);
+  background: var(--green-soft);
+}
+
+.saved-profile-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 4px 0;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.saved-profile-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--on-surface);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.saved-profile-sub {
+  font-size: 12px;
+  color: var(--on-muted);
+}
+
+.saved-profile-delete {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--on-muted);
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.label-presets-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.preset-chip {
+  min-height: 36px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--surface-variant);
+  color: var(--on-surface);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.preset-chip.selected {
+  border-color: var(--primary);
+  background: var(--green-soft);
+  color: var(--green-text);
+  font-weight: 700;
+}
+
 .queue-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -877,16 +1078,27 @@ body {
   gap: 10px;
 }
 
+.modal-dialog-scroll {
+  max-height: 90dvh;
+  overflow-y: auto;
+}
+
+.edit-section-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--on-muted);
+}
+
 .hour-options {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .hour-option-btn {
-  height: 50px;
+  height: 48px;
   border-radius: 14px;
-  border: none;
+  border: 1.5px solid transparent;
   background: var(--surface-variant);
   color: var(--on-surface);
   padding: 0 14px;
@@ -898,6 +1110,50 @@ body {
   font-weight: 700;
   cursor: pointer;
   text-align: left;
+}
+
+.hour-option-btn.selected,
+.half-chip-btn.selected {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+  background: var(--green-soft);
+  color: var(--green-text);
+}
+
+.half-slot-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.half-slot-time {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--on-surface);
+}
+
+.half-chips-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.half-chip-btn {
+  min-height: 48px;
+  border-radius: 12px;
+  border: 1.5px solid transparent;
+  background: var(--surface-variant);
+  color: var(--on-surface);
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .dialog-footer {

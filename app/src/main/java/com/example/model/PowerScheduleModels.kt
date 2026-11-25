@@ -139,3 +139,10 @@ data class PowerStatusSnapshot(
     val isPowerOn: Boolean
         get() = effectiveState == SlotState.ON
 }
+
+data class SavedQueueProfile(
+    val id: String,
+    val queueId: String,
+    val label: String
+)
+

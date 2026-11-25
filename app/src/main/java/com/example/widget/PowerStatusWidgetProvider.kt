@@ -37,7 +37,16 @@ class PowerStatusWidgetProvider : AppWidgetProvider() {
         val now = System.currentTimeMillis()
         val manualOverride = prefs.getActiveManualOverride(now)
 
-        renderWidgets(context, appWidgetManager, appWidgetIds, cached, prefs.selectedQueue, now, manualOverride)
+        renderWidgets(
+            context = context,
+            appWidgetManager = appWidgetManager,
+            appWidgetIds = appWidgetIds,
+            dataset = cached,
+            selectedQueue = prefs.selectedQueue,
+            queueLabel = prefs.addressLabel,
+            nowMillis = now,
+            manualOverride = manualOverride
+        )
         scheduleNextTransitionUpdate(context, cached, now, manualOverride)
 
         val cacheAgeMs = cached?.let { now - it.fetchedAtMillis } ?: Long.MAX_VALUE
@@ -105,6 +114,7 @@ class PowerStatusWidgetProvider : AppWidgetProvider() {
                 appWidgetIds = appWidgetIds,
                 dataset = dataset,
                 selectedQueue = prefs.selectedQueue,
+                queueLabel = prefs.addressLabel,
                 nowMillis = nowMillis,
                 manualOverride = manualOverride
             )
@@ -117,11 +127,14 @@ class PowerStatusWidgetProvider : AppWidgetProvider() {
             selectedQueue: String,
             nowMillis: Long = System.currentTimeMillis(),
             elapsedRealtimeMillis: Long = SystemClock.elapsedRealtime(),
-            manualOverride: ManualStatusOverride? = null
+            manualOverride: ManualStatusOverride? = null,
+            queueLabel: String = ""
         ): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.widget_power_status)
 
-            val queueText = context.getString(R.string.queue_format, dataset?.queueId ?: selectedQueue)
+            val baseQueueText = context.getString(R.string.queue_format, dataset?.queueId ?: selectedQueue)
+            val cleanLabel = queueLabel.trim()
+            val queueText = if (cleanLabel.isNotEmpty()) "$baseQueueText · $cleanLabel" else baseQueueText
             views.setTextViewText(R.id.widget_queue_badge, queueText)
 
             val openAppIntent = Intent(context, MainActivity::class.java).apply {
@@ -200,7 +213,11 @@ class PowerStatusWidgetProvider : AppWidgetProvider() {
                 if (snapshot.nextChangeTimeLabel != null) {
                     val nextLabel = when (snapshot.nextChangeTargetState) {
                         SlotState.ON -> context.getString(R.string.next_on_at, snapshot.nextChangeTimeLabel)
-                        SlotState.MAYBE -> "Можливе вимкн. о ${snapshot.nextChangeTimeLabel}"
+                        SlotState.MAYBE -> if (snapshot.effectiveState == SlotState.ON) {
+                            "Можливе вимкн. о ${snapshot.nextChangeTimeLabel}"
+                        } else {
+                            "Можливі відкл. з ${snapshot.nextChangeTimeLabel}"
+                        }
                         SlotState.OFF, null -> context.getString(R.string.next_off_at, snapshot.nextChangeTimeLabel)
                     }
                     val suffix = if (snapshot.isManualOverride) " · вручну" else ""
@@ -232,6 +249,7 @@ class PowerStatusWidgetProvider : AppWidgetProvider() {
             appWidgetIds: IntArray,
             dataset: ScheduleDataset?,
             selectedQueue: String,
+            queueLabel: String,
             nowMillis: Long,
             manualOverride: ManualStatusOverride?
         ) {
@@ -240,7 +258,8 @@ class PowerStatusWidgetProvider : AppWidgetProvider() {
                 dataset = dataset,
                 selectedQueue = selectedQueue,
                 nowMillis = nowMillis,
-                manualOverride = manualOverride
+                manualOverride = manualOverride,
+                queueLabel = queueLabel
             )
             appWidgetIds.forEach { widgetId ->
                 appWidgetManager.updateAppWidget(widgetId, views)

@@ -5,8 +5,11 @@ import android.content.SharedPreferences
 import com.example.model.DaySchedule
 import com.example.model.KyivDate
 import com.example.model.ManualStatusOverride
+import com.example.model.SavedQueueProfile
 import com.example.model.ScheduleDataset
 import com.example.model.SlotState
+import org.json.JSONArray
+import org.json.JSONObject
 
 class SchedulePreferences(context: Context) {
     private val prefs: SharedPreferences =
@@ -77,16 +80,38 @@ class SchedulePreferences(context: Context) {
     private fun slotOverridesKey(queueId: String, date: KyivDate): String =
         "slot_overrides_${queueId}_${date.year}_${date.month}_${date.day}"
 
+    private fun slotStateToChar(state: SlotState?): Char = when (state) {
+        SlotState.ON -> '1'
+        SlotState.MAYBE -> '2'
+        SlotState.OFF -> '0'
+        null -> '.'
+    }
+
+    fun setSlotOverride(queueId: String, date: KyivDate, slotIdx: Int, state: SlotState?) {
+        val key = slotOverridesKey(queueId, date)
+        val current = prefs.getString(key, null)?.padEnd(48, '.')?.toCharArray()
+            ?: CharArray(48) { '.' }
+        val safeIdx = slotIdx.coerceIn(0, 47)
+        current[safeIdx] = slotStateToChar(state)
+        val encoded = String(current)
+        if (encoded.all { it == '.' }) {
+            prefs.edit().remove(key).apply()
+        } else {
+            prefs.edit().putString(key, encoded).apply()
+        }
+    }
+
+    fun getSlotOverride(queueId: String, date: KyivDate, slotIdx: Int): SlotState? {
+        val encoded = prefs.getString(slotOverridesKey(queueId, date), null) ?: return null
+        val safeIdx = slotIdx.coerceIn(0, encoded.lastIndex)
+        return charToSlotState(encoded[safeIdx])
+    }
+
     fun setHourOverride(queueId: String, date: KyivDate, hour: Int, state: SlotState?) {
         val key = slotOverridesKey(queueId, date)
         val current = prefs.getString(key, null)?.padEnd(48, '.')?.toCharArray()
             ?: CharArray(48) { '.' }
-        val ch = when (state) {
-            SlotState.ON -> '1'
-            SlotState.MAYBE -> '2'
-            SlotState.OFF -> '0'
-            null -> '.'
-        }
+        val ch = slotStateToChar(state)
         val idx1 = (hour * 2).coerceIn(0, 47)
         val idx2 = (hour * 2 + 1).coerceIn(0, 47)
         current[idx1] = ch
@@ -101,8 +126,16 @@ class SchedulePreferences(context: Context) {
 
     fun getHourOverride(queueId: String, date: KyivDate, hour: Int): SlotState? {
         val encoded = prefs.getString(slotOverridesKey(queueId, date), null) ?: return null
-        val idx = (hour * 2).coerceIn(0, encoded.lastIndex)
-        return charToSlotState(encoded[idx])
+        val idx1 = (hour * 2).coerceIn(0, encoded.lastIndex)
+        val idx2 = (hour * 2 + 1).coerceIn(0, encoded.lastIndex)
+        return charToSlotState(encoded[idx1]) ?: charToSlotState(encoded[idx2])
+    }
+
+    fun hasHourManualOverride(queueId: String, date: KyivDate, hour: Int): Boolean {
+        val encoded = prefs.getString(slotOverridesKey(queueId, date), null) ?: return false
+        val idx1 = (hour * 2).coerceIn(0, encoded.lastIndex)
+        val idx2 = (hour * 2 + 1).coerceIn(0, encoded.lastIndex)
+        return charToSlotState(encoded[idx1]) != null || charToSlotState(encoded[idx2]) != null
     }
 
     fun clearDaySlotOverrides(queueId: String, date: KyivDate) {
@@ -142,6 +175,117 @@ class SchedulePreferences(context: Context) {
         else -> null
     }
 
+    fun getSavedProfiles(): List<SavedQueueProfile> {
+        val raw = prefs.getString(KEY_SAVED_PROFILES, null)
+        if (!raw.isNullOrBlank()) {
+            val parsed = runCatching {
+                val arr = JSONArray(raw)
+                buildList {
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.optJSONObject(i) ?: continue
+                        val id = obj.optString("id").trim()
+                        val queueId = obj.optString("queueId").trim()
+                        val label = obj.optString("label", "").trim()
+                        if (id.isNotEmpty() && queueId.isNotEmpty()) {
+                            add(SavedQueueProfile(id = id, queueId = queueId, label = label))
+                        }
+                    }
+                }
+            }.getOrDefault(emptyList())
+            if (parsed.isNotEmpty()) return parsed
+        }
+        val initial = listOf(
+            SavedQueueProfile(
+                id = DEFAULT_PROFILE_ID,
+                queueId = selectedQueue,
+                label = addressLabel
+            )
+        )
+        persistProfiles(initial)
+        prefs.edit().putString(KEY_ACTIVE_PROFILE_ID, DEFAULT_PROFILE_ID).apply()
+        return initial
+    }
+
+    fun getActiveProfileId(): String {
+        val profiles = getSavedProfiles()
+        val stored = prefs.getString(KEY_ACTIVE_PROFILE_ID, null)
+        return profiles.firstOrNull { it.id == stored }?.id ?: profiles.first().id
+    }
+
+    fun getActiveProfile(): SavedQueueProfile {
+        val profiles = getSavedProfiles()
+        val activeId = getActiveProfileId()
+        return profiles.firstOrNull { it.id == activeId } ?: profiles.first()
+    }
+
+    fun selectProfile(profileId: String): SavedQueueProfile? {
+        val profiles = getSavedProfiles()
+        val target = profiles.firstOrNull { it.id == profileId } ?: return null
+        prefs.edit()
+            .putString(KEY_ACTIVE_PROFILE_ID, target.id)
+            .putString(KEY_SELECTED_QUEUE, target.queueId)
+            .putString(KEY_ADDRESS_LABEL, target.label)
+            .apply()
+        return target
+    }
+
+    fun saveProfile(profileId: String?, queueId: String, label: String): SavedQueueProfile {
+        val profiles = getSavedProfiles().toMutableList()
+        val cleanQueue = queueId.trim()
+        val cleanLabel = label.trim()
+        val existingIdx = if (profileId != null) profiles.indexOfFirst { it.id == profileId } else -1
+
+        val saved = if (existingIdx >= 0) {
+            val updated = profiles[existingIdx].copy(queueId = cleanQueue, label = cleanLabel)
+            profiles[existingIdx] = updated
+            updated
+        } else {
+            val newId = "p_${System.currentTimeMillis()}_${profiles.size + 1}"
+            val created = SavedQueueProfile(id = newId, queueId = cleanQueue, label = cleanLabel)
+            profiles.add(created)
+            created
+        }
+
+        persistProfiles(profiles)
+        prefs.edit()
+            .putString(KEY_ACTIVE_PROFILE_ID, saved.id)
+            .putString(KEY_SELECTED_QUEUE, saved.queueId)
+            .putString(KEY_ADDRESS_LABEL, saved.label)
+            .apply()
+        return saved
+    }
+
+    fun deleteProfile(profileId: String): SavedQueueProfile? {
+        val profiles = getSavedProfiles().toMutableList()
+        if (profiles.size <= 1) return null
+        val removed = profiles.removeAll { it.id == profileId }
+        if (!removed || profiles.isEmpty()) return null
+
+        persistProfiles(profiles)
+        val currentActiveId = prefs.getString(KEY_ACTIVE_PROFILE_ID, null)
+        val nextActive = profiles.firstOrNull { it.id == currentActiveId } ?: profiles.first()
+        prefs.edit()
+            .putString(KEY_ACTIVE_PROFILE_ID, nextActive.id)
+            .putString(KEY_SELECTED_QUEUE, nextActive.queueId)
+            .putString(KEY_ADDRESS_LABEL, nextActive.label)
+            .apply()
+        return nextActive
+    }
+
+    private fun persistProfiles(profiles: List<SavedQueueProfile>) {
+        val arr = JSONArray()
+        profiles.forEach { p ->
+            arr.put(
+                JSONObject().apply {
+                    put("id", p.id)
+                    put("queueId", p.queueId)
+                    put("label", p.label)
+                }
+            )
+        }
+        prefs.edit().putString(KEY_SAVED_PROFILES, arr.toString()).apply()
+    }
+
     companion object {
         private const val PREFS_NAME = "svitlo_31_prefs"
         private const val KEY_CACHED_JSON = "cached_schedule_json"
@@ -152,6 +296,9 @@ class SchedulePreferences(context: Context) {
         private const val KEY_LAST_NOTIFIED_TRANSITION = "last_notified_transition"
         private const val KEY_MANUAL_STATUS = "manual_status_override"
         private const val KEY_MANUAL_STATUS_EXPIRES = "manual_status_expires_at"
+        private const val KEY_SAVED_PROFILES = "saved_queue_profiles_json"
+        private const val KEY_ACTIVE_PROFILE_ID = "active_queue_profile_id"
+        const val DEFAULT_PROFILE_ID = "profile_default"
         const val DEFAULT_QUEUE = "3.1"
         const val DEFAULT_ADDRESS = "с. Городище, вул. Польова"
     }
