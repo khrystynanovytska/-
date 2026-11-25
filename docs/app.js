@@ -961,27 +961,87 @@ function wireEvents() {
     reapplyLocalDataset();
   });
 
-  // PWA Install Prompt
+  // PWA Install Prompt (Chromium + Apple Safari)
+  function isStandaloneInstalled() {
+    return window.matchMedia('(display-mode: standalone)').matches ||
+      window.navigator.standalone === true;
+  }
+
+  function isAppleMobileDevice() {
+    const ua = navigator.userAgent || '';
+    return /iPad|iPhone|iPod/.test(ua) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  }
+
+  function isAppleDesktopSafari() {
+    const ua = navigator.userAgent || '';
+    return /Macintosh/.test(ua) && /Safari/.test(ua) && !/Chrome|CriOS|FxiOS|Edg|OPR/.test(ua);
+  }
+
+  const installBtn = document.getElementById('btn-install-pwa');
+  const installBanner = document.getElementById('install-banner');
+  const appleModal = document.getElementById('apple-install-modal');
+
+  function showInstallAffordances() {
+    if (isStandaloneInstalled()) return;
+    installBtn.hidden = false;
+    if (localStorage.getItem('svitlo31_install_banner_dismissed') !== '1') {
+      installBanner.hidden = false;
+    }
+  }
+
+  if (!isStandaloneInstalled() && (isAppleMobileDevice() || isAppleDesktopSafari())) {
+    showInstallAffordances();
+  }
+
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     state.deferredInstallPrompt = e;
-    document.getElementById('btn-install-pwa').hidden = false;
-    document.getElementById('install-banner').hidden = false;
+    showInstallAffordances();
   });
 
-  async function triggerInstall() {
-    if (!state.deferredInstallPrompt) return;
-    state.deferredInstallPrompt.prompt();
-    const choice = await state.deferredInstallPrompt.userChoice;
-    if (choice.outcome === 'accepted') {
-      document.getElementById('btn-install-pwa').hidden = true;
-      document.getElementById('install-banner').hidden = true;
-    }
+  window.addEventListener('appinstalled', () => {
+    installBtn.hidden = true;
+    installBanner.hidden = true;
     state.deferredInstallPrompt = null;
+  });
+
+  function openAppleInstallGuide() {
+    const isDesktopMac = !isAppleMobileDevice() && isAppleDesktopSafari();
+    document.getElementById('apple-install-title').textContent = isDesktopMac
+      ? 'Встановлення на Mac (Safari)'
+      : 'Встановлення на iPhone / iPad';
+    document.getElementById('apple-steps-ios').hidden = isDesktopMac;
+    document.getElementById('apple-steps-mac').hidden = !isDesktopMac;
+    appleModal.hidden = false;
   }
 
-  document.getElementById('btn-install-pwa').addEventListener('click', triggerInstall);
+  async function triggerInstall() {
+    if (state.deferredInstallPrompt) {
+      state.deferredInstallPrompt.prompt();
+      const choice = await state.deferredInstallPrompt.userChoice;
+      if (choice.outcome === 'accepted') {
+        installBtn.hidden = true;
+        installBanner.hidden = true;
+      }
+      state.deferredInstallPrompt = null;
+      return;
+    }
+    openAppleInstallGuide();
+  }
+
+  installBtn.addEventListener('click', triggerInstall);
   document.getElementById('btn-install-banner').addEventListener('click', triggerInstall);
+  document.getElementById('btn-dismiss-install-banner').addEventListener('click', () => {
+    installBanner.hidden = true;
+    localStorage.setItem('svitlo31_install_banner_dismissed', '1');
+  });
+  document.getElementById('btn-close-apple-install').addEventListener('click', () => {
+    appleModal.hidden = true;
+  });
+  appleModal.addEventListener('click', (e) => {
+    if (e.target.id === 'apple-install-modal') appleModal.hidden = true;
+  });
 }
 
 let swRegistration = null;

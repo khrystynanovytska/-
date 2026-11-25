@@ -5,19 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#15803D" id="meta-theme-color" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Світло 3.1" />
   <title>Світло 3.1</title>
 
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png" />
-  <link rel="apple-touch-icon" href="./icon-192.png" />
+  <link rel="apple-touch-icon" sizes="192x192" href="./icon-192.png" />
+  <link rel="apple-touch-icon" sizes="512x512" href="./icon-512.png" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
 
-  <link rel="stylesheet" href="./styles.css?v=6" />
+  <link rel="stylesheet" href="./styles.css?v=7" />
 </head>
 <body>
   <div class="app-shell">
@@ -52,13 +54,16 @@
       </div>
     </header>
 
-    <!-- Install prompt banner (shown when browser supports 1-tap PWA install) -->
+    <!-- Install prompt banner (Chrome 1-tap + Apple Safari instruction modal) -->
     <section class="install-banner" id="install-banner" hidden>
       <div class="install-banner-text">
-        <strong>Додати на екран телефону</strong>
+        <strong>Додати на екран пристрою</strong>
         <span>Відкриватиметься як звичайний додаток і працюватиме без інтернету</span>
       </div>
-      <button type="button" class="btn-primary btn-sm" id="btn-install-banner">Встановити</button>
+      <div class="install-banner-actions">
+        <button type="button" class="btn-primary btn-sm" id="btn-install-banner">Встановити</button>
+        <button type="button" class="banner-close-btn" id="btn-dismiss-install-banner" aria-label="Сховати підказку">✕</button>
+      </div>
     </section>
 
     <!-- Main Status Container -->
@@ -282,6 +287,41 @@
     </div>
   </div>
 
-  <script src="./app.js?v=6"></script>
+  <!-- Apple / Safari Install Guide Modal -->
+  <div class="modal-backdrop" id="apple-install-modal" hidden>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="apple-install-title">
+      <h2 class="modal-title" id="apple-install-title">Встановлення на iPhone / iPad</h2>
+      <p class="muted" id="apple-install-subtitle">
+        На пристроях Apple веб-додаток додається за 3 секунди через меню Safari:
+      </p>
+
+      <ol class="install-steps" id="apple-steps-ios">
+        <li>
+          <span>Натисніть кнопку <strong>«Поділитися»</strong></span>
+          <span class="ios-share-chip" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+              <polyline points="16 6 12 2 8 6"></polyline>
+              <line x1="12" y1="2" x2="12" y2="15"></line>
+            </svg>
+          </span>
+          <span>у нижній (або верхній) панелі браузера. Якщо відкрито в Telegram/Viber — спершу натисніть <strong>«Відкрити в Safari»</strong>.</span>
+        </li>
+        <li>Прокрутіть меню трохи вниз і оберіть <strong>«На початковий екран»</strong> (<em>Add to Home Screen</em>).</li>
+        <li>Натисніть <strong>«Додати»</strong> — іконка <strong>«Світло 3.1»</strong> з’явиться на екрані!</li>
+      </ol>
+
+      <ol class="install-steps" id="apple-steps-mac" hidden>
+        <li>У верхньому меню <strong>Safari</strong> відкрийте <strong>Файл (File)</strong> → <strong>Додати до Dock… (Add to Dock)</strong> або натисніть значок «Поділитися» праворуч вгорі.</li>
+        <li>Натисніть <strong>«Додати»</strong> — «Світло 3.1» запускатиметься як окремий додаток із Dock.</li>
+      </ol>
+
+      <div class="dialog-footer">
+        <button type="button" class="btn-primary full-width" id="btn-close-apple-install">Зрозуміло</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./app.js?v=7"></script>
 </body>
 </html>

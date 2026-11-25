@@ -166,11 +166,55 @@ body {
   flex-direction: column;
   gap: 2px;
   font-size: 13px;
+  flex: 1;
 }
 
 .install-banner-text span {
   color: var(--on-muted);
   font-size: 12px;
+}
+
+.install-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.banner-close-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--on-muted);
+  font-size: 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.install-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--on-surface);
+}
+
+.ios-share-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: var(--surface-variant);
+  color: var(--primary);
+  margin: 0 2px;
 }
 
 /* Cards */
